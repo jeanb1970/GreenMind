@@ -1,0 +1,51 @@
+# Environnement virtuel Python
+.venv/
+
+# Fichiers compilés et caches Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Résultats générés : bases SQLite, index FAISS, journaux, PID
+/outputs/
+/docs/ObsoleteDocs/
+/docs/Préparation/
+/docs/Présentation/
+
+# Caches et modèles téléchargés localement
+.cache/
+huggingface/
+models/
+*.gguf
+*.safetensors
+
+# Configuration locale et secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Fichiers macOS
+.DS_Store
+._*
+
+# Réglages personnels des éditeurs
+.vscode/
+.idea/
+
+# Rapports de couverture et fichiers de construction
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Programme de formation externe, inutile à la restauration du projet
+/docs/Architecte*.pdf
+
+# Programme de formation externe, inutile à la restauration du projet
+/docs/Architecte*.pdf

@@ -1,0 +1,14 @@
+plant_id: basilic_01
+display_name: Basilic
+scenario: demo_dry_basil
+
+# Pourcentages sur l'échelle interne du simulateur.
+initial_soil_moisture_sim_pct: 40.0
+low_threshold_sim_pct: 35.0
+high_threshold_sim_pct: 65.0
+
+# Coefficients illustratifs, sans calibration agronomique.
+simulation:
+  base_evaporation_per_tick: 4.0
+  reference_temperature_c: 20.0
+  temperature_factor_per_c: 0.05

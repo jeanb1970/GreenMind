@@ -1,0 +1,10 @@
+# Exemple validable par `docker compose config`; tester ensuite sur le Mac M3.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2  # geler le tag exact/digest en J1
+    container_name: greenmind-mosquitto
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: "no"

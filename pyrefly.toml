@@ -1,0 +1,6 @@
+# Racine des modules Python du projet.
+search-path = ["src"]
+
+# Interpréteur Python du projet.
+python-interpreter-path = ".venv/bin/python3"
+python-version = "3.12"
