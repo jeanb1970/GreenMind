@@ -113,3 +113,60 @@ def test_invalid_yaml_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="syntaxe YAML invalide"):
         load_plant_config(path)
+
+def test_rearm_threshold_is_loaded(tmp_path, config_data):
+    path = write_config(tmp_path, config_data)
+
+    config = load_plant_config(path)
+
+    assert config.rearm_threshold_sim_pct == 40.0, (
+        "Le seuil de réarmement du scénario doit être de 40 %."
+    )
+
+
+@pytest.mark.parametrize(
+    "value, expected_message",
+    [
+        (34.0, "strictement supérieur au seuil bas"),
+        (35.0, "strictement supérieur au seuil bas"),
+        (66.0, "inférieur ou égal au seuil haut"),
+        (-1.0, "rearm_threshold_sim_pct"),
+        (101.0, "rearm_threshold_sim_pct"),
+        (float("nan"), "rearm_threshold_sim_pct"),
+        (float("inf"), "rearm_threshold_sim_pct"),
+    ],
+)
+def test_invalid_rearm_threshold_is_rejected(
+    tmp_path, config_data, value, expected_message
+):
+    config_data["rearm_threshold_sim_pct"] = value
+    path = write_config(tmp_path, config_data)
+
+    with pytest.raises(ValueError) as caught:
+        load_plant_config(path)
+
+    assert expected_message in str(caught.value), (
+        "L'erreur doit expliquer pourquoi le seuil de réarmement "
+        "est invalide."
+    )
+
+
+def test_rearm_threshold_can_equal_high_threshold(tmp_path, config_data):
+    config_data["rearm_threshold_sim_pct"] = (
+        config_data["high_threshold_sim_pct"]
+    )
+    path = write_config(tmp_path, config_data)
+
+    config = load_plant_config(path)
+
+    assert config.rearm_threshold_sim_pct == config.high_threshold_sim_pct, (
+        "Le seuil de réarmement doit pouvoir être égal au seuil haut."
+    )
+
+
+def test_missing_rearm_threshold_is_rejected(tmp_path, config_data):
+    del config_data["rearm_threshold_sim_pct"]
+    path = write_config(tmp_path, config_data)
+
+    with pytest.raises(ValueError, match="rearm_threshold_sim_pct"):
+        load_plant_config(path)

@@ -42,6 +42,7 @@ class PlantConfig(BaseModel):
     scenario: Literal["demo_dry_basil"]
     initial_soil_moisture_sim_pct: Percentage
     low_threshold_sim_pct: Percentage
+    rearm_threshold_sim_pct: Percentage
     high_threshold_sim_pct: Percentage
     simulation: SimulationConfig
 
@@ -89,6 +90,18 @@ def load_plant_config(path: Path) -> PlantConfig:
     if config.low_threshold_sim_pct >= config.high_threshold_sim_pct:
         raise ValueError(
             "Le seuil bas d'humidité doit être strictement inférieur "
+            "au seuil haut."
+        )
+
+    if config.rearm_threshold_sim_pct <= config.low_threshold_sim_pct:
+        raise ValueError(
+            "Le seuil de réarmement doit être strictement supérieur "
+            "au seuil bas."
+        )
+
+    if config.rearm_threshold_sim_pct > config.high_threshold_sim_pct:
+        raise ValueError(
+            "Le seuil de réarmement doit être inférieur ou égal "
             "au seuil haut."
         )
 
