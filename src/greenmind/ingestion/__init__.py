@@ -1,0 +1,1 @@
+"""Réception et persistance des événements MQTT GreenMind."""
