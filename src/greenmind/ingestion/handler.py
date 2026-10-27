@@ -1,32 +1,14 @@
-"""Traitement d'une télémétrie reçue depuis MQTT."""
+"""Frontière réseau v2 : topic, schéma et persistance validés ensemble."""
 
-from sqlalchemy import Engine
-
-from greenmind.db.readings import save_reading
-from greenmind.schemas import parse_telemetry
+from greenmind.db.readings import save_message
+from greenmind.schemas import TelemetryV2, SimulationEvent, parse_v2
 
 
-def ingest_telemetry(
-    engine: Engine,
-    topic: str,
-    payload: str | bytes,
-) -> bool:
-    """Valide et enregistre une télémétrie.
-
-    Retourne True après insertion, False pour un événement déjà présent.
-
-    Une ValueError indique un message ou un topic invalide.
-    Les erreurs SQL sont propagées au service appelant.
-    """
-    message = parse_telemetry(payload)
-
-    expected_topic = (
-        f"greenmind/v1/plants/{message.plant_id}/telemetry"
-    )
-    if topic != expected_topic:
-        raise ValueError(
-            f"Topic de télémétrie invalide : {topic!r}. "
-            f"Topic attendu pour cette plante : {expected_topic!r}."
-        )
-
-    return save_reading(engine, message)
+def ingest_telemetry(engine, topic: str, payload: str | bytes) -> bool:
+    if topic == "greenmind/v2/simulation/events":
+        message = parse_v2(SimulationEvent, payload)
+    else:
+        message = parse_v2(TelemetryV2, payload)
+        if topic != f"greenmind/v2/plants/{message.plant_id}/telemetry":
+            raise ValueError("Topic de télémétrie v2 incohérent avec la plante ou la version.")
+    return save_message(engine, message)

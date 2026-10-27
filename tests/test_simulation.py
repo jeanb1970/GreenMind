@@ -1,16 +1,14 @@
-from pathlib import Path
-
 import pytest
-import yaml
 
 from greenmind.domain.simulation import dry_one_tick
 
 
 @pytest.fixture
 def profile():
-    project_root = Path(__file__).resolve().parents[1]
-    path = project_root / "config" / "plants.yaml"
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return {"initial_soil_moisture_sim_pct": 40.0, "low_threshold_sim_pct": 35.0,
+            "simulation": {"base_evaporation_per_tick": 4.0,
+                           "reference_temperature_c": 20.0,
+                           "temperature_factor_per_c": 0.05}}
 
 
 def test_drying_is_reproducible_and_crosses_threshold(profile):

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sqlalchemy import URL, Engine, create_engine, event
+from sqlalchemy import URL, Engine, MetaData, create_engine, event, inspect
 from sqlalchemy.exc import SQLAlchemyError
 
 from greenmind.db.models import Base
@@ -15,6 +15,7 @@ BUSY_TIMEOUT_MS = 5000
 
 def create_database_engine(
     database_path: Path = DEFAULT_DATABASE_PATH,
+    *, metadata: MetaData = Base.metadata,
 ) -> Engine:
     """Prépare la base et retourne un moteur réutilisable par le processus."""
     database_path = database_path.resolve()
@@ -57,7 +58,14 @@ def create_database_engine(
                 )
 
         # Crée les tables absentes sans supprimer les données existantes.
-        Base.metadata.create_all(engine)
+        # create_all ne migre pas : refuser un schéma existant incompatible.
+        inspector = inspect(engine)
+        if inspector.has_table("sensor_readings"):
+            existing = {c["name"] for c in inspector.get_columns("sensor_readings")}
+            expected = set(metadata.tables["sensor_readings"].columns.keys())
+            if existing != expected:
+                raise RuntimeError("Schéma SQLite incompatible ; utiliser une base distincte ou une migration explicite.")
+        metadata.create_all(engine)
 
     except SQLAlchemyError as error:
         engine.dispose()

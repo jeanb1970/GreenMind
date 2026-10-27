@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import signal
+from pathlib import Path
 from threading import Event
 from time import monotonic
 from uuid import uuid4
@@ -11,13 +12,13 @@ from uuid import uuid4
 import paho.mqtt.client as mqtt
 from sqlalchemy.exc import SQLAlchemyError
 
-from greenmind.db.session import create_database_engine
+from greenmind.db.session import create_database_engine, DEFAULT_DATABASE_PATH
 from greenmind.ingestion.handler import ingest_telemetry
 
 
 LOGGER = logging.getLogger("greenmind.ingestion")
 
-TELEMETRY_TOPIC = "greenmind/v1/plants/basilic_01/telemetry"
+TELEMETRY_TOPICS = [("greenmind/v2/plants/+/telemetry", 1), ("greenmind/v2/simulation/events", 1)]
 STARTUP_TIMEOUT_S = 10.0
 CONNECTION_TIMEOUT_S = 5.0
 
@@ -70,7 +71,7 @@ def main() -> int:
         if not 1 <= port <= 65535:
             raise ValueError("Le port MQTT doit être compris entre 1 et 65535.")
 
-        database_engine = create_database_engine()
+        database_engine = create_database_engine(Path(os.environ.get("GREENMIND_DATABASE_PATH", str(DEFAULT_DATABASE_PATH))))
         engine = database_engine
         LOGGER.info("Base SQLite initialisée.")
 
@@ -101,7 +102,7 @@ def main() -> int:
             LOGGER.info("Connexion MQTT établie.")
 
             result, mid = mqtt_client.subscribe(
-                TELEMETRY_TOPIC, qos=1
+                TELEMETRY_TOPICS
             )
             if result != mqtt.MQTT_ERR_SUCCESS:
                 fail(
@@ -111,7 +112,7 @@ def main() -> int:
                 return
 
             subscription_mid = mid
-            LOGGER.info("Abonnement demandé : %s.", TELEMETRY_TOPIC)
+            LOGGER.info("Abonnement demandé : %s.", TELEMETRY_TOPICS)
 
         def on_subscribe(
             mqtt_client, userdata, mid, reason_codes, properties
@@ -123,8 +124,8 @@ def main() -> int:
                 fail("Confirmation reçue pour un abonnement inattendu.")
                 return
 
-            # Un seul topic est demandé, avec QoS 1.
-            if len(reason_codes) != 1 or reason_codes[0] != 1:
+            # Les deux abonnements doivent être accordés en QoS 1.
+            if len(reason_codes) != 2 or any(code != 1 for code in reason_codes):
                 fail(
                     "Le broker n'a pas accordé l'abonnement en QoS 1 : "
                     f"{reason_codes}."
@@ -134,7 +135,7 @@ def main() -> int:
             subscribed.set()
             LOGGER.info(
                 "Ingestion prête : abonnement confirmé en QoS 1 sur %s.",
-                TELEMETRY_TOPIC,
+                TELEMETRY_TOPICS,
             )
 
         def acknowledge(mqtt_client, message):
@@ -189,7 +190,7 @@ def main() -> int:
             event_id = json.loads(message.payload)["event_id"]
 
             if inserted:
-                LOGGER.info("Mesure enregistrée | événement : %s", event_id)
+                LOGGER.info("Événement enregistré | événement : %s", event_id)
             else:
                 LOGGER.info("Doublon ignoré | événement : %s", event_id)
 

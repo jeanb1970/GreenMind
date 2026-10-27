@@ -1,0 +1,49 @@
+# Configuration unique de la serre GreenMind v1.4.
+# Paramètres pédagogiques, sans calibration agronomique.
+scenario: demo_greenhouse_day
+plants:
+  - plant_id: basilic_01
+    bed_id: bac_basilic
+    actuator_id: arroseur_basilic
+    display_name: Basilic
+    initial_soil_moisture_sim_pct: 50.0
+    low_threshold_sim_pct: 35.0
+    rearm_threshold_sim_pct: 40.0
+    high_threshold_sim_pct: 65.0
+    target_soil_moisture_sim_pct: 50.0
+    base_evaporation_per_hour: 4.0
+    reference_temperature_c: 20.0
+    temperature_factor_per_c: 0.05
+    irrigation_gain_per_sim_s: 3.0
+    max_watering_duration_sim_s: 10.0
+    watering_cooldown_real_s: 60.0
+  - plant_id: thym_01
+    bed_id: bac_thym
+    actuator_id: arroseur_thym
+    display_name: Thym
+    initial_soil_moisture_sim_pct: 35.0
+    low_threshold_sim_pct: 20.0
+    rearm_threshold_sim_pct: 25.0
+    high_threshold_sim_pct: 45.0
+    target_soil_moisture_sim_pct: 35.0
+    base_evaporation_per_hour: 2.0
+    reference_temperature_c: 20.0
+    temperature_factor_per_c: 0.05
+    irrigation_gain_per_sim_s: 2.0
+    max_watering_duration_sim_s: 10.0
+    watering_cooldown_real_s: 60.0
+  - plant_id: romarin_01
+    bed_id: bac_romarin
+    actuator_id: arroseur_romarin
+    display_name: Romarin
+    initial_soil_moisture_sim_pct: 40.0
+    low_threshold_sim_pct: 25.0
+    rearm_threshold_sim_pct: 30.0
+    high_threshold_sim_pct: 50.0
+    target_soil_moisture_sim_pct: 40.0
+    base_evaporation_per_hour: 2.5
+    reference_temperature_c: 20.0
+    temperature_factor_per_c: 0.05
+    irrigation_gain_per_sim_s: 2.5
+    max_watering_duration_sim_s: 10.0
+    watering_cooldown_real_s: 60.0

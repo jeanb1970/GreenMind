@@ -3,7 +3,7 @@
 from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from greenmind.db.models import SensorReading
+from greenmind.db.models import GreenhouseReading
 from greenmind.db.session import (
     BUSY_TIMEOUT_MS,
     DEFAULT_DATABASE_PATH,
@@ -47,7 +47,7 @@ def main() -> int:
             ).scalar_one()
 
             count = connection.execute(
-                select(func.count()).select_from(SensorReading)
+                select(func.count()).select_from(GreenhouseReading)
             ).scalar_one()
 
         if journal_mode.lower() != "wal":

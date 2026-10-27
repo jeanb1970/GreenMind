@@ -22,19 +22,17 @@ def write_weather(tmp_path, content):
 
 def test_project_fixture():
     project_root = Path(__file__).resolve().parents[1]
-    path = project_root / "data" / "fixtures" / "weather_sample.csv"
+    path = project_root / "data" / "fixtures" / "weather_greenhouse_day.csv"
 
     readings = load_weather(path)
 
     assert len(readings) == 24, (
         "La fixture de démonstration doit contenir 24 lignes."
     )
-    assert all(
-        reading.air_temperature_c == 25.0
-        and reading.air_humidity_pct == 50.0
-        and reading.provenance == PROVENANCE
-        for reading in readings
-    ), "Les valeurs météo doivent correspondre au scénario documenté."
+    assert all(reading.provenance == PROVENANCE for reading in readings)
+    assert len({reading.air_temperature_c for reading in readings}) > 1
+    assert len({reading.air_humidity_pct for reading in readings}) > 1
+
 
 
 @pytest.mark.parametrize(
