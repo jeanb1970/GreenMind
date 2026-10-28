@@ -14,10 +14,10 @@ def show(engine: SimulationEngine) -> None:
     moment = state.simulated_at.astimezone(SCENARIO_TIMEZONE)
     weather_hour = state.weather.observed_at.astimezone(SCENARIO_TIMEZONE)
     values = " | ".join(f"{name} : {value:.2f} %" for name, value in state.soil.items())
-    mode = "terminée" if state.completed else "pause" if state.paused else "lecture"
+    mode = "terminée" if state.day_complete else "pause" if state.paused else "lecture"
     print(
-        f"{moment:%d/%m %H:%M} | {mode} | pas {state.simulated_tick} | "
-        f"révision {state.state_revision}\n"
+        f"{moment:%d/%m %H:%M} | {mode} | pas {state.heure_virtuelle} | "
+        f"révision {state.current_state}\n"
         f"  Météo de l'intervalle {weather_hour:%H:%M} : "
         f"{state.weather.air_temperature_c:g} °C / "
         f"{state.weather.air_humidity_pct:g} % d'humidité de l'air\n  {values}"
@@ -27,7 +27,7 @@ def show(engine: SimulationEngine) -> None:
 def interactive(engine: SimulationEngine) -> None:
     print(
         "Commandes : heure, etat, lecture, humidite <plante> <valeur>, quitter.\n"
-        "Plantes : basilic_01, thym_01, romarin_01.\n"
+        "Plantes : basilic, thym, romarin.\n"
         "Pendant la lecture : Ctrl+C met en pause ; une heure toutes les 5 secondes."
     )
     while True:

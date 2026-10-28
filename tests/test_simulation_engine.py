@@ -39,11 +39,11 @@ def test_daily_weather_shape_and_provenance(setup):
     assert min(humidities) == 40.0 and max(humidities) == 82.0
     assert temperatures[5] < temperatures[10] < temperatures[14]
     assert temperatures[14] > temperatures[18] > temperatures[23]
-    assert all(r.provenance == "synthetic_weather_plus_synthetic_soil" for r in weather)
+    assert all(r.provenance == "meteo_simulee" for r in weather)
     state = engine.snapshot()
     assert state.simulated_at.astimezone(SCENARIO_TIMEZONE).isoformat() == "2026-07-10T00:00:00+02:00"
-    assert state.paused and not state.completed
-    assert state.simulated_tick == state.state_revision == 0
+    assert state.paused and not state.day_complete
+    assert state.heure_virtuelle == state.current_state == 0
 
 
 def test_pause_and_snapshot_cannot_change_state(setup):
@@ -53,7 +53,7 @@ def test_pause_and_snapshot_cannot_change_state(setup):
     assert engine.poll() is None
     assert engine.pause() is None
     copy = before.soil
-    copy["basilic_01"] = 0.0
+    copy["basilic"] = 0.0
     assert engine.snapshot() == before
     with pytest.raises(FrozenInstanceError):
         before.paused = False
@@ -67,14 +67,14 @@ def test_first_hour_uses_first_interval_not_second(setup):
     assert change.after.simulated_at == start.simulated_at + timedelta(hours=1)
     assert change.after.weather == weather[0]
     assert change.after.soil == dry_greenhouse_one_hour(config, start.soil, 20.0, 75.0)
-    assert change.after.state_revision == 1
+    assert change.after.current_state == 1
 
 
 def test_full_day_automatic_and_manual_have_identical_values(setup):
     config, weather, clock, manual = setup
     auto = SimulationEngine(config, weather, clock=clock)
     auto.resume()
-    assert auto.snapshot().run_id != manual.snapshot().run_id
+    assert auto.snapshot().simulation != manual.snapshot().simulation
     for hour in range(1, 25):
         expected = manual.advance_one_hour().after
         clock.now = hour * 5.0 - 0.01
@@ -86,10 +86,10 @@ def test_full_day_automatic_and_manual_have_identical_values(setup):
         assert actual.soil == expected.soil
         assert actual.simulated_at == expected.simulated_at
         assert actual.weather == weather[hour - 1]
-        assert actual.simulated_tick == hour
+        assert actual.heure_virtuelle == hour
         assert all(0 <= v <= 100 for v in actual.soil.values())
         assert auto.poll() is None
-    assert actual.completed and actual.paused
+    assert actual.day_complete and actual.paused
     assert actual.simulated_at.astimezone(SCENARIO_TIMEZONE).isoformat() == "2026-07-11T00:00:00+02:00"
     clock.now += 10000
     assert auto.poll() is None
@@ -111,7 +111,7 @@ def test_resume_discards_pause_time_and_duplicate_resume_keeps_deadline(setup):
     engine.resume()
     assert engine.poll() is None
     clock.now += 5.0
-    assert engine.poll().after.simulated_tick == 2
+    assert engine.poll().after.heure_virtuelle == 2
 
 
 def test_delayed_poll_does_not_skip_intervals_or_burst(setup):
@@ -119,7 +119,7 @@ def test_delayed_poll_does_not_skip_intervals_or_burst(setup):
     engine.resume()
     clock.now = 1000.0
     event = engine.poll()
-    assert event.after.simulated_tick == 1
+    assert event.after.heure_virtuelle == 1
     assert event.after.weather == weather[0]
     assert engine.poll() is None
     clock.now += 5.0
@@ -130,14 +130,14 @@ def test_manual_override_preserves_history_time_and_other_beds(setup):
     config, weather, _, engine = setup
     engine.advance_one_hour()
     before = engine.snapshot()
-    change = engine.set_soil_moisture("thym_01", 18.0)
-    assert change.kind == "manual_override" and change.plant_id == "thym_01"
+    change = engine.set_soil_moisture("thym", 18.0)
+    assert change.kind == "modification_manuelle" and change.plant_id == "thym"
     assert change.before == before
-    assert change.after.soil == {**before.soil, "thym_01": 18.0}
+    assert change.after.soil == {**before.soil, "thym": 18.0}
     assert change.after.simulated_at == before.simulated_at
-    assert change.after.simulated_tick == before.simulated_tick
-    assert change.after.state_revision == before.state_revision + 1
-    assert before.soil["thym_01"] != 18.0
+    assert change.after.heure_virtuelle == before.heure_virtuelle
+    assert change.after.current_state == before.current_state + 1
+    assert before.soil["thym"] != 18.0
     expected = dry_greenhouse_one_hour(
         config, change.after.soil, weather[1].air_temperature_c, weather[1].air_humidity_pct,
     )
@@ -149,14 +149,14 @@ def test_invalid_override_leaves_state_unchanged(setup, value):
     engine = setup[3]
     before = engine.snapshot()
     with pytest.raises(ValueError, match="humidité"):
-        engine.set_soil_moisture("basilic_01", value)
+        engine.set_soil_moisture("basilic", value)
     assert engine.snapshot() == before
 
 
 @pytest.mark.parametrize("value", [0, 100])
 def test_override_accepts_boundary_values(setup, value):
     engine = setup[3]
-    assert engine.set_soil_moisture("basilic_01", value).after.soil["basilic_01"] == value
+    assert engine.set_soil_moisture("basilic", value).after.soil["basilic"] == value
 
 
 def test_invalid_target_and_running_mutations_are_rejected(setup):
@@ -168,7 +168,7 @@ def test_invalid_target_and_running_mutations_are_rejected(setup):
     with pytest.raises(ValueError, match="pause"):
         engine.advance_one_hour()
     with pytest.raises(ValueError, match="pause"):
-        engine.set_soil_moisture("basilic_01", 32.0)
+        engine.set_soil_moisture("basilic", 32.0)
     assert engine.snapshot() == before
 
 

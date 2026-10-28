@@ -1,6 +1,6 @@
 """Parcours explicite proposition → confirmation → suivi, sans IA."""
+from greenmind.identifiers import next_id, CommandId, ProposalId
 
-from uuid import UUID, uuid4
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
@@ -12,23 +12,23 @@ router = APIRouter(prefix='/api/v1', tags=['Arrosage virtuel'])
 
 
 class ProposalRequest(ApiModel):
-    proposal_id: UUID = Field(default_factory=uuid4)
+    proposal_id: ProposalId = Field(default_factory=lambda: next_id("proposal"))
 
 
 class ConfirmationRequest(ApiModel):
-    proposal_id: UUID
-    command_id: UUID = Field(default_factory=uuid4)
+    proposal_id: ProposalId
+    command_id: CommandId = Field(default_factory=lambda: next_id("command"))
 
 
 class ProposalResponse(ApiModel):
     proposal_id: str
-    run_id: str
+    simulation: str
     plant_id: str
-    state_revision: int
-    duration_sim_s: float
-    soil_moisture_before_pct: float
-    soil_moisture_after_pct: float
-    capped: bool
+    current_state: int
+    watering_duration_s: float
+    moist_before_pct: float
+    moist_after_pct: float
+    duration_limited: bool
     reason: str
     expires_at: str
 
@@ -36,11 +36,11 @@ class ProposalResponse(ApiModel):
 class WateringStatusResponse(ApiModel):
     command_id: str
     proposal_id: str
-    run_id: str
+    simulation: str
     plant_id: str
-    status: Literal['PENDING', 'SENT', 'EXECUTED', 'REJECTED', 'TIMED_OUT']
+    status: Literal['en_attente', 'envoyé', 'exécuté', 'refusé', 'TIMED_OUT']
     reason: str
-    resulting_revision: int | None
+    resulting_state: int | None
     measurement_pending: bool
     expires_at: str
 
@@ -85,7 +85,7 @@ def confirm(plant_id: str, payload: ConfirmationRequest, db=Depends(get_db),
 
 
 @router.get('/watering-commands/{command_id}', response_model=WateringStatusResponse)
-def track(command_id: UUID, db=Depends(get_db)):
+def track(command_id: CommandId, db=Depends(get_db)):
     try:
         return watering.command_status(db, command_id)
     except watering.WateringError as error:

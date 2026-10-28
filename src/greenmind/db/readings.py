@@ -1,11 +1,12 @@
 """Persistance atomique et lecture des mesures, alertes et journal de la serre."""
+from greenmind.time_formats import local_text
+from greenmind.identifiers import next_id
 
 from datetime import datetime, timezone
 from functools import lru_cache
 import json
 from pathlib import Path
-from uuid import UUID, uuid4
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 from greenmind.db.models import (
@@ -19,7 +20,7 @@ from greenmind.db.models import (
 )
 from greenmind.domain.alerts import next_dry_alert_state
 from greenmind.greenhouse_config import GreenhouseConfig, load_greenhouse_config
-from greenmind.schemas import SimulationControl, SimulationEvent, TelemetryV2, WateringEvent
+from greenmind.schemas import SimulationControl, SimulationEvent, TelemetryV3, WateringEvent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config/greenhouse.yaml"
@@ -30,13 +31,13 @@ def get_default_greenhouse_config() -> GreenhouseConfig:
     return load_greenhouse_config(DEFAULT_CONFIG_PATH)
 
 
-def _utc_text(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+def instant_text(value: datetime) -> str:
+    return local_text(value)
 
 
 def _handle_telemetry_side_effects(
     session: Session,
-    message: TelemetryV2,
+    message: TelemetryV3,
     received_at: str,
     config: GreenhouseConfig,
 ) -> None:
@@ -44,78 +45,78 @@ def _handle_telemetry_side_effects(
     bed = config.get_plant(message.plant_id)
     active = session.scalar(
         select(AlertRow).where(
-            AlertRow.run_id == str(message.run_id),
+            AlertRow.simulation == str(message.simulation),
             AlertRow.plant_id == message.plant_id,
-            AlertRow.status == "OPEN",
+            AlertRow.status == "ouverte",
         ).order_by(AlertRow.opened_at.desc()).limit(1)
     )
     is_currently_open = active is not None
     should_be_open = next_dry_alert_state(
-        message.soil_moisture_sim_pct,
+        message.soil_moisture_pct,
         alert_open=is_currently_open,
-        low_threshold_sim_pct=bed.low_threshold_sim_pct,
-        rearm_threshold_sim_pct=bed.rearm_threshold_sim_pct,
+        moist_low_pct=bed.moist_low_pct,
+        moist_rearm_pct=bed.moist_rearm_pct,
     )
 
     if not is_currently_open and should_be_open:
-        new_alert_id = str(uuid4())
+        new_alert_id = next_id("alert")
         session.add(AlertRow(
             alert_id=new_alert_id,
-            run_id=str(message.run_id),
+            simulation=str(message.simulation),
             plant_id=message.plant_id,
-            status="OPEN",
+            status="ouverte",
             opened_at=received_at,
             opening_event_id=str(message.event_id),
-            trigger_moisture_pct=message.soil_moisture_sim_pct,
+            moist_trigger_pct=message.soil_moisture_pct,
         ))
         session.add(GreenhouseEventRow(
-            event_id=str(uuid4()),
-            run_id=str(message.run_id),
+            event_id=next_id("event"),
+            simulation=str(message.simulation),
             plant_id=message.plant_id,
             created_at=received_at,
-            simulated_at=_utc_text(message.simulated_at),
-            event_type="ALERT_OPENED",
-            summary=f"Alerte de sécheresse ouverte sur {bed.display_name} ({message.soil_moisture_sim_pct:.1f} % < {bed.low_threshold_sim_pct:.1f} %).",
-            details_json=json.dumps({
+            simulated_at=local_text(message.simulated_at, False),
+            event_type="alerte_ouverte",
+            summary=f"Alerte de sécheresse ouverte sur {bed.display_name} ({message.soil_moisture_pct:.1f} % < {bed.moist_low_pct:.1f} %).",
+            details=json.dumps({
                 "alert_id": new_alert_id,
                 "plant_id": message.plant_id,
-                "trigger_moisture_pct": message.soil_moisture_sim_pct,
-                "low_threshold_sim_pct": bed.low_threshold_sim_pct,
+                "moist_trigger_pct": message.soil_moisture_pct,
+                "moist_low_pct": bed.moist_low_pct,
             }),
         ))
     elif is_currently_open and not should_be_open and active is not None:
-        active.status = "CLOSED"
+        active.status = "clôturée"
         active.closed_at = received_at
         active.closing_event_id = str(message.event_id)
-        active.resolved_moisture_pct = message.soil_moisture_sim_pct
+        active.moist_resolved_pct = message.soil_moisture_pct
         session.add(GreenhouseEventRow(
-            event_id=str(uuid4()),
-            run_id=str(message.run_id),
+            event_id=next_id("event"),
+            simulation=str(message.simulation),
             plant_id=message.plant_id,
             created_at=received_at,
-            simulated_at=_utc_text(message.simulated_at),
-            event_type="ALERT_CLOSED",
-            summary=f"Alerte de sécheresse levée sur {bed.display_name} ({message.soil_moisture_sim_pct:.1f} % >= {bed.rearm_threshold_sim_pct:.1f} %).",
-            details_json=json.dumps({
+            simulated_at=local_text(message.simulated_at, False),
+            event_type="alerte_clôturée",
+            summary=f"Alerte de sécheresse levée sur {bed.display_name} ({message.soil_moisture_pct:.1f} % >= {bed.moist_rearm_pct:.1f} %).",
+            details=json.dumps({
                 "alert_id": active.alert_id,
                 "plant_id": message.plant_id,
-                "resolved_moisture_pct": message.soil_moisture_sim_pct,
-                "rearm_threshold_sim_pct": bed.rearm_threshold_sim_pct,
+                "moist_resolved_pct": message.soil_moisture_pct,
+                "moist_rearm_pct": bed.moist_rearm_pct,
             }),
         ))
 
-    if message.measurement_origin == "manual_override":
+    if message.measurement_origin == "modification_manuelle":
         session.add(GreenhouseEventRow(
-            event_id=str(uuid4()),
-            run_id=str(message.run_id),
+            event_id=next_id("event"),
+            simulation=str(message.simulation),
             plant_id=message.plant_id,
             created_at=received_at,
-            simulated_at=_utc_text(message.simulated_at),
-            event_type="MANUAL_OVERRIDE",
-            summary=f"Humidité imposée à {message.soil_moisture_sim_pct:.1f} % sur {bed.display_name}.",
-            details_json=json.dumps({
+            simulated_at=local_text(message.simulated_at, False),
+            event_type="modification_manuelle",
+            summary=f"Humidité imposée à {message.soil_moisture_pct:.1f} % sur {bed.display_name}.",
+            details=json.dumps({
                 "plant_id": message.plant_id,
-                "soil_moisture_sim_pct": message.soil_moisture_sim_pct,
+                "soil_moisture_pct": message.soil_moisture_pct,
             }),
         ))
 
@@ -127,17 +128,17 @@ def _handle_simulation_event_side_effects(
 ) -> None:
     if message.control_id is not None:
         session.add(GreenhouseEventRow(
-            event_id=str(uuid4()),
-            run_id=str(message.run_id),
+            event_id=next_id("event"),
+            simulation=str(message.simulation),
             plant_id=None,
             created_at=received_at,
-            simulated_at=_utc_text(message.simulated_at),
-            event_type=f"CONTROL_{message.status}",
+            simulated_at=local_text(message.simulated_at, False),
+            event_type=f"contrôle_{message.status}",
             summary=message.reason,
-            details_json=json.dumps({
+            details=json.dumps({
                 "control_id": str(message.control_id),
                 "status": message.status,
-                "state_revision": message.state_revision,
+                "current_state": message.current_state,
                 "reason": message.reason,
             }),
         ))
@@ -145,28 +146,28 @@ def _handle_simulation_event_side_effects(
 
 def save_message(
     engine,
-    message: TelemetryV2 | SimulationEvent | WateringEvent,
+    message: TelemetryV3 | SimulationEvent | WateringEvent,
     *,
     config: GreenhouseConfig | None = None,
 ) -> bool:
     """Enregistre le message et applique les effets d'alerte et de journal de manière atomique."""
-    received_at = _utc_text(datetime.now(timezone.utc))
-    if isinstance(message, TelemetryV2):
+    received_at = instant_text(datetime.now(timezone.utc))
+    if isinstance(message, TelemetryV3):
         model = GreenhouseReading
         values = message.model_dump()
-        for key in ("event_id", "run_id"):
+        for key in ("event_id", "simulation"):
             values[key] = str(values[key])
         for key in ("observed_at", "simulated_at", "emitted_at"):
-            values[key] = _utc_text(values[key])
+            values[key] = local_text(values[key], precise=(key == "emitted_at"))
         values["received_at"] = received_at
     elif isinstance(message, WateringEvent):
         model = WateringEventRow
-        values = dict(event_id=str(message.event_id), run_id=str(message.run_id),
+        values = dict(event_id=str(message.event_id), simulation=str(message.simulation),
                       command_id=str(message.command_id), received_at=received_at,
                       payload=message.model_dump_json())
     else:
         model = SimulationEventRow
-        values = dict(event_id=str(message.event_id), run_id=str(message.run_id),
+        values = dict(event_id=str(message.event_id), simulation=str(message.simulation),
                       control_id=str(message.control_id) if message.control_id else None,
                       received_at=received_at, payload=message.model_dump_json())
 
@@ -174,23 +175,23 @@ def save_message(
 
     with Session(engine) as session, session.begin():
         session.execute(insert(SimulationRun).values(
-            run_id=str(message.run_id), first_received_at=received_at,
-        ).on_conflict_do_nothing(index_elements=["run_id"]))
+            simulation=str(message.simulation), first_received_at=received_at,
+        ).on_conflict_do_nothing(index_elements=["simulation"]))
 
         inserted = session.scalar(insert(model).values(**values)
                                   .on_conflict_do_nothing(index_elements=["event_id"])
                                   .returning(model.event_id))
 
         if inserted is not None:
-            if isinstance(message, TelemetryV2):
+            if isinstance(message, TelemetryV3):
                 # Conserver les mesures tardives dans l'historique sans rejouer
                 # les transitions d'alerte ni les forçages d'un état dépassé.
                 current_id = session.scalar(select(GreenhouseReading.event_id).where(
-                    GreenhouseReading.run_id == str(message.run_id),
+                    GreenhouseReading.simulation == str(message.simulation),
                     GreenhouseReading.plant_id == message.plant_id,
-                ).order_by(GreenhouseReading.state_revision.desc(),
+                ).order_by(GreenhouseReading.current_state.desc(),
                            GreenhouseReading.emitted_at.desc(),
-                           GreenhouseReading.event_id.desc()).limit(1))
+                           func.length(GreenhouseReading.event_id).desc(), GreenhouseReading.event_id.desc()).limit(1))
                 if current_id == str(message.event_id):
                     _handle_telemetry_side_effects(session, message, received_at, active_config)
             elif isinstance(message, WateringEvent):
@@ -202,13 +203,13 @@ def save_message(
     return inserted is not None
 
 
-def latest_reading(engine, run_id: str | UUID, plant_id: str) -> GreenhouseReading | None:
+def latest_reading(engine, simulation: str, plant_id: str) -> GreenhouseReading | None:
     """Une mesure tardive d'une ancienne révision ne remplace jamais l'état actuel."""
     with Session(engine) as session:
         return session.scalar(select(GreenhouseReading).where(
-            GreenhouseReading.run_id == str(run_id), GreenhouseReading.plant_id == plant_id,
-        ).order_by(GreenhouseReading.state_revision.desc(),
-                   GreenhouseReading.emitted_at.desc(), GreenhouseReading.event_id.desc()).limit(1))
+            GreenhouseReading.simulation == str(simulation), GreenhouseReading.plant_id == plant_id,
+        ).order_by(GreenhouseReading.current_state.desc(),
+                   GreenhouseReading.emitted_at.desc(), func.length(GreenhouseReading.event_id).desc(), GreenhouseReading.event_id.desc()).limit(1))
 
 
 def reserve_control(engine, command: SimulationControl) -> SimulationControl:
@@ -219,44 +220,46 @@ def reserve_control(engine, command: SimulationControl) -> SimulationControl:
     """
     with Session(engine) as session, session.begin():
         inserted = session.scalar(insert(SimulationControlRow).values(
-            control_id=str(command.control_id), run_id=str(command.run_id),
+            control_id=str(command.control_id), simulation=str(command.simulation),
             payload=command.model_dump_json(),
         ).on_conflict_do_nothing(index_elements=["control_id"])
           .returning(SimulationControlRow.control_id))
         if inserted is None:
             row = session.get(SimulationControlRow, str(command.control_id))
+            if row is None:
+                raise RuntimeError("Impossible de retrouver la commande réservée en base.")
             original = SimulationControl.model_validate_json(row.payload)
-            fields = ("action", "expected_revision", "plant_id", "value")
+            fields = ("action", "expected_state", "plant_id", "moist_request_pct")
             if any(getattr(original, key) != getattr(command, key) for key in fields):
                 raise ValueError("Identifiant de contrôle réutilisé avec un contenu différent.")
             return original
 
         from greenmind.db.watering import ensure_watering_idle
-        ensure_watering_idle(session, str(command.run_id))
+        ensure_watering_idle(session, str(command.simulation))
 
         sample = session.scalar(select(GreenhouseReading).where(
-            GreenhouseReading.run_id == str(command.run_id),
-        ).order_by(GreenhouseReading.state_revision.desc(),
+            GreenhouseReading.simulation == str(command.simulation),
+        ).order_by(GreenhouseReading.current_state.desc(),
                    GreenhouseReading.emitted_at.desc()).limit(1))
-        if sample is None or sample.state_revision != command.expected_revision:
+        if sample is None or sample.current_state != command.expected_state:
             raise ValueError("Conflit de révision d'état : la révision attendue n'est plus courante.")
         return command
 
 
-def active_alert(engine, run_id: str | UUID, plant_id: str) -> AlertRow | None:
+def active_alert(engine, simulation: str, plant_id: str) -> AlertRow | None:
     """Retourne l'alerte ouverte pour un bac dans la session courante."""
     with Session(engine) as session:
         return session.scalar(select(AlertRow).where(
-            AlertRow.run_id == str(run_id),
+            AlertRow.simulation == str(simulation),
             AlertRow.plant_id == plant_id,
-            AlertRow.status == "OPEN",
+            AlertRow.status == "ouverte",
         ).order_by(AlertRow.opened_at.desc()).limit(1))
 
 
-def list_alerts(engine, run_id: str | UUID, plant_id: str | None = None) -> list[AlertRow]:
+def list_alerts(engine, simulation: str, plant_id: str | None = None) -> list[AlertRow]:
     """Retourne l'historique des alertes pour la session, optionnellement filtré par bac."""
     with Session(engine) as session:
-        query = select(AlertRow).where(AlertRow.run_id == str(run_id))
+        query = select(AlertRow).where(AlertRow.simulation == str(simulation))
         if plant_id is not None:
             query = query.where(AlertRow.plant_id == plant_id)
         return list(session.scalars(query.order_by(AlertRow.opened_at.desc())))
@@ -264,14 +267,14 @@ def list_alerts(engine, run_id: str | UUID, plant_id: str | None = None) -> list
 
 def list_events(
     engine,
-    run_id: str | UUID,
+    simulation: str,
     plant_id: str | None = None,
     limit: int = 100,
 ) -> list[GreenhouseEventRow]:
     """100 derniers événements de la session courante, avec filtre bac optionnel."""
     server_limit = min(max(1, limit), 100)
     with Session(engine) as session:
-        query = select(GreenhouseEventRow).where(GreenhouseEventRow.run_id == str(run_id))
+        query = select(GreenhouseEventRow).where(GreenhouseEventRow.simulation == str(simulation))
         if plant_id is not None:
             query = query.where(GreenhouseEventRow.plant_id == plant_id)
         return list(session.scalars(query.order_by(GreenhouseEventRow.sequence.desc()).limit(server_limit)))
@@ -279,7 +282,7 @@ def list_events(
 
 def recent_readings(
     engine,
-    run_id: str | UUID,
+    simulation: str,
     plant_id: str,
     limit: int = 24,
 ) -> list[GreenhouseReading]:
@@ -288,32 +291,32 @@ def recent_readings(
     with Session(engine) as session:
         return list(session.scalars(
             select(GreenhouseReading).where(
-                GreenhouseReading.run_id == str(run_id),
+                GreenhouseReading.simulation == str(simulation),
                 GreenhouseReading.plant_id == plant_id,
-            ).order_by(GreenhouseReading.state_revision.desc(),
+            ).order_by(GreenhouseReading.current_state.desc(),
                        GreenhouseReading.emitted_at.desc()).limit(server_limit)
         ))
 
 
-def latest_run_id(engine) -> str | None:
+def latest_simulation(engine) -> str | None:
     """Retourne l'identifiant de la session la plus récente."""
     with Session(engine) as session:
         return session.scalar(
-            select(SimulationRun.run_id).order_by(SimulationRun.first_received_at.desc()).limit(1)
+            select(SimulationRun.simulation).order_by(SimulationRun.first_received_at.desc()).limit(1)
         )
 
 
-def latest_simulation_event(engine, run_id: str | UUID) -> SimulationEventRow | None:
+def latest_simulation_event(engine, simulation: str) -> SimulationEventRow | None:
     """Retourne le dernier événement de contrôle ou d'état de simulation."""
     with Session(engine) as session:
         return session.scalar(
             select(SimulationEventRow).where(
-                SimulationEventRow.run_id == str(run_id)
+                SimulationEventRow.simulation == str(simulation)
             ).order_by(SimulationEventRow.received_at.desc(), SimulationEventRow.event_id.desc()).limit(1)
         )
 
 
-def get_control_event(engine, control_id: str | UUID) -> SimulationEventRow | None:
+def get_control_event(engine, control_id: str) -> SimulationEventRow | None:
     """Retrouve l'événement d'acquittement corrélé à une commande de simulation."""
     with Session(engine) as session:
         return session.scalar(

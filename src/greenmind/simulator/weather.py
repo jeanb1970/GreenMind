@@ -1,4 +1,5 @@
 """Lecture et validation du fichier météo local."""
+from greenmind.time_formats import parse_local
 
 import csv
 from dataclasses import dataclass
@@ -15,8 +16,8 @@ REQUIRED_COLUMNS = {
 }
 
 ALLOWED_PROVENANCES = {
-    "synthetic_weather_plus_synthetic_soil",
-    "historical_weather_plus_synthetic_soil",
+    "meteo_simulee",
+    "meteo_historique",
 }
 
 
@@ -35,10 +36,10 @@ def _parse_row(row: dict[str, str], line_number: int) -> WeatherReading:
     prefix = f"Ligne météo {line_number}"
 
     try:
-        observed_at = datetime.fromisoformat(row["observed_at"])
+        observed_at = parse_local(row["observed_at"], False)
     except ValueError as error:
         raise ValueError(
-            f"{prefix} : date invalide, format ISO 8601 attendu."
+            f"{prefix} : date invalide, format belge AAAA-MM-JJ HH:MM:SS attendu."
         ) from error
 
     if observed_at.tzinfo is None or observed_at.utcoffset() is None:

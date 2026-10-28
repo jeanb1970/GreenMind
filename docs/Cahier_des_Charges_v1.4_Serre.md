@@ -41,11 +41,11 @@ La validation pédagogique du sujet et la durée autorisée de présentation res
 
 ### 2.1. Entités
 
-| Bac | Espèce | `plant_id` conservé dans les échanges | `bed_id` | `actuator_id` |
+| Bac | Espèce | `plant_id` conservé dans les échanges | `bed_id` | `arroseur_id` |
 |---|---|---|---|---|
-| Bac 1 | Basilic | `basilic_01` | `bac_basilic` | `arroseur_basilic` |
-| Bac 2 | Thym | `thym_01` | `bac_thym` | `arroseur_thym` |
-| Bac 3 | Romarin | `romarin_01` | `bac_romarin` | `arroseur_romarin` |
+| Bac 1 | Basilic | `basilic` | `bac_basilic` | `arroseur_basilic` |
+| Bac 2 | Thym | `thym` | `bac_thym` | `arroseur_thym` |
+| Bac 3 | Romarin | `romarin` | `bac_romarin` | `arroseur_romarin` |
 
 **Choix de conception :** un profil représente toute la rangée. Il n'y a pas de simulation individuelle de chaque pied. La configuration fixe une correspondance univoque espèce/bac/capteur/arroseur. `plant_id` reste la clé de routage pour limiter la rupture avec le code existant ; l'interface parle de bacs. Aucun état d'humidité, alerte ou arrosage ne doit être partagé accidentellement entre bacs.
 
@@ -81,12 +81,12 @@ Chaque ligne décrit les conditions appliquées durant l'intervalle `[h, h+1h[`.
 
 - `simulated_at` : date/heure de l'état virtuel, affichée avec le fuseau du scénario.
 - `observed_at` : horodatage de la ligne météo utilisée, conservé pour la provenance.
-- `emitted_at` et `received_at` : heures UTC réelles d'émission et d'ingestion.
-- `simulated_tick` : nombre de pas horaires terminés ; 0 désigne l'état initial.
-- `state_revision` : compteur croissant des changements d'état, y compris injection et arrosage au même instant virtuel.
-- `run_id` : identifiant unique de l'exécution de démonstration.
+- `emitted_at` et `received_at` : heures belges réelles d'émission et d'ingestion.
+- `heure_virtuelle` : nombre de pas horaires terminés ; 0 désigne l'état initial.
+- `current_state` : compteur croissant des changements d'état, y compris injection et arrosage au même instant virtuel.
+- `simulation` : identifiant unique de l'exécution de démonstration.
 
-**Choix initial :** un pas = une heure virtuelle ; vitesse nominale = un pas toutes les cinq secondes réelles. Le bouton « +1 heure » exécute exactement un pas ; les heures intermédiaires ne sont pas sautées. Les mêmes paramètres, données et interventions aux mêmes pas donnent les mêmes valeurs et transitions ; UUID et dates réelles peuvent différer.
+**Choix initial :** un pas = une heure virtuelle ; vitesse nominale = un pas toutes les cinq secondes réelles. Le bouton « +1 heure » exécute exactement un pas ; les heures intermédiaires ne sont pas sautées. Les mêmes paramètres, données et interventions aux mêmes pas donnent les mêmes valeurs et transitions ; identifiants et dates réelles peuvent différer.
 
 Le calcul existant reste une base réutilisable : perte horaire modulée par température et humidité de l'air, résultat borné entre 0 et 100. Les unités des coefficients deviennent explicites. Les trois bacs utilisent la même heure météo, chacun avec ses paramètres.
 
@@ -100,17 +100,17 @@ Les expirations de propositions, timeouts et repos d'arrosage restent en seconde
 
 La seconde page, intitulée **Console de simulation**, propose :
 
-1. L'état de connexion, le scénario, `run_id`, l'heure virtuelle et le mode pause/lecture.
+1. L'état de connexion, le scénario, `simulation`, l'heure virtuelle et le mode pause/lecture.
 2. Pause et reprise à la vitesse unique de 1 heure virtuelle toutes les 5 secondes réelles.
 3. En pause : avancer exactement d'une heure par clic.
 4. En pause : sélectionner un bac, saisir une humidité finie entre 0 et 100, puis cliquer « Appliquer la valeur simulée ».
 5. Le statut de l'intervention et un lien logique vers ses événements et nouvelles mesures.
 
-**Sémantique de la modification à l'instant T :** remplacer l'état courant du substrat du seul bac choisi à l'heure virtuelle courante. La prochaine évolution repart de cette valeur. Ce n'est ni une réécriture des anciennes mesures, ni une panne de capteur simulée indépendante du substrat. L'événement garde la valeur avant/après et l'origine `manual_override`. Une mesure d'humidité de l'air ne doit pas être confondue avec celle du substrat.
+**Sémantique de la modification à l'instant T :** remplacer l'état courant du substrat du seul bac choisi à l'heure virtuelle courante. La prochaine évolution repart de cette valeur. Ce n'est ni une réécriture des anciennes mesures, ni une panne de capteur simulée indépendante du substrat. L'événement garde la valeur avant/après et l'origine `modification_manuelle`. Une mesure d'humidité de l'air ne doit pas être confondue avec celle du substrat.
 
 Le front envoie une intention à FastAPI ; l'API valide et publie un contrôle MQTT ; le simulateur applique, acquitte et republie les mesures ; l'ingestion persiste ; les fronts relisent l'API. Aucun front ne modifie SQLite ni l'état mémoire du simulateur directement.
 
-Les contrôles portent `control_id`, `run_id`, l'action, les arguments et la révision attendue. Un doublon n'applique pas deux avances temporelles. Une action sur une ancienne exécution ou une révision périmée est refusée. L'API et le simulateur sérialisent les mutations. Une avance/injection est refusée lorsqu'un arrosage est en cours ; une opération incertaine doit être résolue avant une nouvelle mutation. Une reprise automatique après erreur est exclue.
+Les contrôles portent `control_id`, `simulation`, l'action, les arguments et la révision attendue. Un doublon n'applique pas deux avances temporelles. Une action sur une ancienne exécution ou une révision périmée est refusée. L'API et le simulateur sérialisent les mutations. Une avance/injection est refusée lorsqu'un arrosage est en cours ; une opération incertaine doit être résolue avant une nouvelle mutation. Une reprise automatique après erreur est exclue.
 
 Chaque avance d'une heure reste une opération suivie ; l'interface n'annonce pas la fin avant l'acquittement et la disponibilité des révisions attendues en base. Une perte d'événement requiert un diagnostic ou un reset, pas une déclaration de réussite.
 
@@ -132,7 +132,7 @@ Trois arroseurs sont adressables indépendamment ; un arrosage ne change que le 
 
 Le simulateur applique le gain virtuel une fois, incrémente la révision, émet l'acquittement corrélé et une télémétrie après action. La durée virtuelle ne fait pas avancer l'horloge météo horaire. L'interface affiche « Exécuté » uniquement après l'acquittement métier ; si la nouvelle mesure n'est pas encore ingérée, elle affiche « mesure après arrosage en attente ». Le seul PUBACK MQTT ne confirme pas un arrosage.
 
-Cycle : `PENDING → SENT → EXECUTED / REJECTED / TIMED_OUT`. Un timeout indique « exécution non confirmée », sans renvoi automatique. Un acquittement tardif est corrélé, enregistré et peut résoudre l'incertitude ; il ne provoque pas un deuxième effet. Le simulateur refuse les anciennes exécutions et dédoublonne les commandes durant la session. Un redémarrage inattendu impose un redémarrage contrôlé de la démo ; le PoC ne promet pas une reprise durable adaptée à une pompe réelle.
+Cycle : `en_attente → envoyé → exécuté / refusé / TIMED_OUT`. Un timeout indique « exécution non confirmée », sans renvoi automatique. Un acquittement tardif est corrélé, enregistré et peut résoudre l'incertitude ; il ne provoque pas un deuxième effet. Le simulateur refuse les anciennes exécutions et dédoublonne les commandes durant la session. Un redémarrage inattendu impose un redémarrage contrôlé de la démo ; le PoC ne promet pas une reprise durable adaptée à une pompe réelle.
 
 ## 6. Front principal et historique de la serre
 
@@ -149,7 +149,7 @@ Le **Tableau de bord de la serre** présente :
 
 Début de scénario, pause/reprise, avance demandée/appliquée/refusée, humidité imposée, ouverture/clôture d'alerte, proposition d'arrosage, refus, commande envoyée, exécution, timeout, acquittement tardif et incidents de service détectés. Les répétitions de présence et mesures ordinaires restent dans l'historique des mesures, pas dans le journal métier. Les pannes empêchant toute écriture sont signalées dans les logs et l'état de santé ; aucune exhaustivité fictive du journal SQL n'est annoncée.
 
-Chaque événement possède un identifiant, `run_id`, un type stable, un libellé français, la cible éventuelle, un instant réel et virtuel si connu, une origine (`simulator`, `rules`, `user`, `system`), un identifiant de corrélation et des détails structurés utiles. Les changements de valeur conservent avant/après. Les questions libres et prompts ne sont pas journalisés systématiquement.
+Chaque événement possède un identifiant, `simulation`, un type stable, un libellé français, la cible éventuelle, un instant réel et virtuel si connu, une origine (`simulator`, `rules`, `user`, `system`), un identifiant de corrélation et des détails structurés utiles. Les changements de valeur conservent avant/après. Les questions libres et prompts ne sont pas journalisés systématiquement.
 
 Afficher les 100 derniers événements de l'exécution courante, avec filtre par bac ou toute la serre ; limite maximale imposée côté serveur. Ordre déterministe par séquence d'ingestion, heures réelle et virtuelle affichées séparément. Le journal est persistant et reste visible après rafraîchissement. Les filtres temporels, la pagination navigable et les anciennes exécutions sont reportés. Le reset efface les données de démonstration selon la procédure annoncée.
 
@@ -196,17 +196,17 @@ flowchart LR
 
 ### 8.1. Version des échanges et MQTT
 
-Le contrat actuellement implémenté reste décrit dans `docs/contracts.md`. Les ajouts d'horloge et de session sont une rupture : les nouveaux échanges utilisent `schema_version: 2` et le préfixe `greenmind/v2`. Tous les producteurs/consommateurs basculent ensemble en B3. Aucun mélange silencieux de schémas v1/v2.
+Le contrat actuellement implémenté reste décrit dans `docs/contracts.md`. Les ajouts d'horloge et de session sont une rupture : les nouveaux échanges utilisent `schema_version: 3` et le préfixe `greenmind/v3`. Tous les producteurs/consommateurs basculent ensemble en B3. Aucun mélange silencieux de schémas v1/v2/v3.
 
 | Flux cible | Topic | Particularité |
 |---|---|---|
-| Télémétrie | `greenmind/v2/plants/{plant_id}/telemetry` | Champs métier actuels + `run_id`, `simulated_at`, `state_revision`, `measurement_origin` ; tick initial 0 autorisé |
-| Arrosage | `greenmind/v2/plants/{plant_id}/commands` | `command_id`, `run_id`, bac/arroseur concordants, durée virtuelle, révision attendue, émission et expiration réelles |
-| Acquittement arrosage | `greenmind/v2/plants/{plant_id}/events` | `event_id`, commande, exécution, révision résultante, état et valeur après effet |
-| Contrôles simulation | `greenmind/v2/simulation/controls` | `control_id`, `run_id`, action, arguments, révision attendue et expiration réelle |
-| État et acquittements simulation | `greenmind/v2/simulation/events` | État courant/presence ou résultat corrélé d'un contrôle |
+| Télémétrie | `greenmind/v3/plants/{plant_id}/telemetry` | Champs métier actuels + `simulation`, `simulated_at`, `current_state`, `measurement_origin` ; tick initial 0 autorisé |
+| Arrosage | `greenmind/v3/plants/{plant_id}/commands` | `command_id`, `simulation`, bac/arroseur concordants, durée virtuelle, révision attendue, émission et expiration réelles |
+| Acquittement arrosage | `greenmind/v3/plants/{plant_id}/events` | `event_id`, commande, exécution, révision résultante, état et valeur après effet |
+| Contrôles simulation | `greenmind/v3/simulation/controls` | `control_id`, `simulation`, action, arguments, révision attendue et expiration réelle |
+| État et acquittements simulation | `greenmind/v3/simulation/events` | État courant/presence ou résultat corrélé d'un contrôle |
 
-Tous les flux : QoS 1, `retain=False`, validation Pydantic stricte, sessions non persistantes et dédoublonnage. `measurement_origin` distingue `initial`, `model`, `manual_override`, `watering`, `heartbeat` ; la provenance météo reste un champ séparé. Un ordre stable de mutation et une séquence d'état commune permettent de détecter les messages périmés. L'état courant n'est jamais remplacé par une révision plus ancienne reçue tardivement.
+Tous les flux : QoS 1, `retain=False`, validation Pydantic stricte, sessions non persistantes et dédoublonnage. `measurement_origin` distingue `initial`, `calcul_horaire`, `modification_manuelle`, `arrosage`, `signal_presence` ; la provenance météo reste un champ séparé. Un ordre stable de mutation et une séquence d'état commune permettent de détecter les messages périmés. L'état courant n'est jamais remplacé par une révision plus ancienne reçue tardivement.
 
 Les schémas exhaustifs, codes d'erreur et contraintes SQL seront écrits et testés en B3 avant la modification des producteurs. Les ACK de transport et les preuves d'ingestion/exécution restent distincts. Une session MQTT non persistante ne garantit pas la récupération de tous les événements après une panne ; cette limite doit rester documentée et visible pendant les essais.
 
@@ -221,15 +221,15 @@ Préfixe HTTP `/api/v1` conservé pour la première API applicative, indépendan
 | `GET /plants/{plant_id}` | Profil, dernière mesure, alerte et arroseur |
 | `GET /plants/{plant_id}/measurements` | Mesures récentes de l'exécution courante, limite imposée côté serveur |
 | `GET /events` | 100 derniers événements de la session, filtre par bac |
-| `POST /plants/{plant_id}/watering-proposals` | Proposition déterministe |
-| `POST /plants/{plant_id}/watering-commands` | Confirmation, validation, publication |
-| `GET /watering-commands/{command_id}` | Suivi corrélé |
+| `POST /plants/{plant_id}/arrosage-proposals` | Proposition déterministe |
+| `POST /plants/{plant_id}/arrosage-commands` | Confirmation, validation, publication |
+| `GET /arrosage-commands/{command_id}` | Suivi corrélé |
 | `GET /simulation` | Heure, mode, vitesse, révision, scénario et présence |
-| `POST /simulation/controls` | `PAUSE`, `RESUME`, `ADVANCE` (+1 heure), `SET_SOIL_MOISTURE` |
+| `POST /simulation/controls` | `pause`, `reprendre`, `avancer_1_heure` (+1 heure), `modifier_humidite_sol` |
 | `GET /simulation/controls/{control_id}` | Suivi de l'application du contrôle |
 | `POST /assistant/ask` | Question + bac sélectionné → faits, réponse, sources |
 
-Les mutations utilisent une clé d'idempotence ; répéter la même clé et le même contenu retourne la même opération, changer le contenu avec la même clé est refusé. Une proposition est liée au bac, au `run_id` et à la révision ; elle expire après 60 secondes réelles et n'est consommable qu'une fois. Une opération MQTT asynchrone acceptée retourne 202, jamais une preuve d'exécution.
+Les mutations utilisent une clé d'idempotence ; répéter la même clé et le même contenu retourne la même opération, changer le contenu avec la même clé est refusé. Une proposition est liée au bac, au `simulation` et à la révision ; elle expire après 60 secondes réelles et n'est consommable qu'une fois. Une opération MQTT asynchrone acceptée retourne 202, jamais une preuve d'exécution.
 
 Erreurs : 404 pour cible inconnue ; 409 pour conflit/révision/expiration ; 422 pour contenu invalide ; 503 pour dépendance indisponible. Le mode simulation désactivé refuse explicitement ses mutations. Les listes ont une limite maximale imposée côté serveur ; les opérations gardent un délai borné.
 
@@ -251,7 +251,7 @@ L'envoi MQTT et l'écriture SQL ne forment pas une transaction distribuée : per
 - Le lanceur supervise les quatre processus, attend la disponibilité et le SUBACK d'ingestion avant les premières mesures. Un second lancement est refusé.
 - Une nouvelle exécution démarre en pause à l'heure initiale et publie trois mesures initiales, sans appliquer encore de dessèchement.
 - Les PID sont vérifiés avant arrêt, les connexions fermées proprement ; aucun arrêt global de Python ou Ollama.
-- Reset uniquement après arrêt confirmé des processus ; remise à zéro du seul broker GreenMind si nécessaire ; conservation des modèles et du corpus. Nouvelle exécution = nouveau `run_id`.
+- Reset uniquement après arrêt confirmé des processus ; remise à zéro du seul broker GreenMind si nécessaire ; conservation des modèles et du corpus. Nouvelle exécution = nouveau `simulation`.
 - Documenter une commande de démarrage, une d'arrêt, une de reset et l'URL et les deux pages de l'application.
 - En cas de panne de broker, bloquer les nouvelles mutations ; après reconnexion, signaler toute lacune ou incertitude. En cas de panne d'Ollama, conserver la partie IoT.
 
@@ -323,3 +323,17 @@ permet les essais au clavier. La météo de chaque état correspond au dernier
 intervalle appliqué, et non à une nouvelle observation physique à cet instant.
 Le raccordement MQTT, les publications de présence et la persistance des
 transitions restent à réaliser dans les briques suivantes.
+
+
+## Nommage des échanges et formats
+
+Le dictionnaire de référence est `docs/Nommage_champs_valide.md`. Les échanges
+réseau utilisent le schéma 3 ; les producteurs et consommateurs basculent ensemble.
+La simulation est identifiée par un libellé `Simu_001 du 28 Oct. 2026 à 14:30`.
+Les identifiants d’événements, contrôles, arrosages, propositions et alertes utilisent
+des compteurs persistants indépendants. Les retransmissions gardent leur clé.
+Les trois `plant_id` sont `basilic`, `thym` et `romarin`.
+Les dates utilisent l’heure belge, avec secondes pour la météo et l’heure virtuelle,
+et cinq décimales pour les instants précis. La base de serre antérieure est
+reconstruite explicitement sans conservation de son historique ; les compteurs
+restent persistants dans un stockage distinct.

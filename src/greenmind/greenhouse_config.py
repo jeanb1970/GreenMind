@@ -10,11 +10,11 @@ Percentage = Annotated[float, Field(ge=0, le=100)]
 NonNegative = Annotated[float, Field(ge=0)]
 
 
-PlantId = Literal["basilic_01", "thym_01", "romarin_01"]
+PlantId = Literal["basilic", "thym", "romarin"]
 IDENTITIES = {
-    "basilic_01": ("bac_basilic", "arroseur_basilic"),
-    "thym_01": ("bac_thym", "arroseur_thym"),
-    "romarin_01": ("bac_romarin", "arroseur_romarin"),
+    "basilic": ("bac_basilic", "arroseur_basilic"),
+    "thym": ("bac_thym", "arroseur_thym"),
+    "romarin": ("bac_romarin", "arroseur_romarin"),
 }
 Positive = Annotated[float, Field(gt=0)]
 
@@ -29,27 +29,27 @@ class BedProfile(BaseModel):
 
     plant_id: PlantId
     bed_id: str
-    actuator_id: str
+    arroseur_id: str
     display_name: Annotated[str, Field(min_length=1)]
-    initial_soil_moisture_sim_pct: Percentage
-    low_threshold_sim_pct: Percentage
-    rearm_threshold_sim_pct: Percentage
-    high_threshold_sim_pct: Percentage
-    target_soil_moisture_sim_pct: Percentage
-    base_evaporation_per_hour: Positive
+    moist_initial_pct: Percentage
+    moist_low_pct: Percentage
+    moist_rearm_pct: Percentage
+    moist_high_pct: Percentage
+    moist_target_pct: Percentage
+    evaporation_pct_per_hour: Positive
     reference_temperature_c: float
     temperature_factor_per_c: NonNegative
-    irrigation_gain_per_sim_s: Positive
-    max_watering_duration_sim_s: Annotated[float, Field(gt=0, le=10)]
-    watering_cooldown_real_s: Positive
+    watering_gain_pct_per_s: Positive
+    watering_max_duration_s: Annotated[float, Field(gt=0, le=10)]
+    watering_rest_s: Positive
 
     @model_validator(mode="after")
     def validate_profile(self) -> Self:
-        if (self.bed_id, self.actuator_id) != IDENTITIES[self.plant_id]:
+        if (self.bed_id, self.arroseur_id) != IDENTITIES[self.plant_id]:
             raise ValueError("Le bac et l'arroseur doivent correspondre à la plante.")
         if not (
-            self.low_threshold_sim_pct < self.rearm_threshold_sim_pct
-            < self.target_soil_moisture_sim_pct <= self.high_threshold_sim_pct
+            self.moist_low_pct < self.moist_rearm_pct
+            < self.moist_target_pct <= self.moist_high_pct
         ):
             raise ValueError(
                 "Les seuils doivent respecter : bas < réarmement < cible ≤ haut."
@@ -62,7 +62,7 @@ class GreenhouseConfig(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
-    scenario: Literal["demo_greenhouse_day"]
+    scenario: Literal["journee_serre"]
     plants: tuple[BedProfile, ...]
 
     @field_validator("plants", mode="before")
@@ -73,7 +73,7 @@ class GreenhouseConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_collection(self) -> Self:
-        for name in ("plant_id", "bed_id", "actuator_id"):
+        for name in ("plant_id", "bed_id", "arroseur_id"):
             values = [getattr(profile, name) for profile in self.plants]
             if len(values) != len(set(values)):
                 raise ValueError(f"Identifiant dupliqué dans la serre : {name}.")

@@ -5,7 +5,7 @@ from greenmind.domain.simulation import dry_one_tick
 
 @pytest.fixture
 def profile():
-    return {"initial_soil_moisture_sim_pct": 40.0, "low_threshold_sim_pct": 35.0,
+    return {"moist_initial_pct": 40.0, "moist_low_pct": 35.0,
             "simulation": {"base_evaporation_per_tick": 4.0,
                            "reference_temperature_c": 20.0,
                            "temperature_factor_per_c": 0.05}}
@@ -13,7 +13,7 @@ def profile():
 
 def test_drying_is_reproducible_and_crosses_threshold(profile):
     def replay():
-        moisture = profile["initial_soil_moisture_sim_pct"]
+        moisture = profile["moist_initial_pct"]
         history = [moisture]
         for _ in range(3):
             moisture = dry_one_tick(
@@ -30,10 +30,10 @@ def test_drying_is_reproducible_and_crosses_threshold(profile):
     assert history == pytest.approx([40.0, 37.5, 35.0, 32.5]), (
         "L'évolution de l'humidité ne correspond pas au scénario attendu."
     )
-    assert history[2] >= profile["low_threshold_sim_pct"], (
+    assert history[2] >= profile["moist_low_pct"], (
         "Le seuil bas ne doit pas être franchi avant le troisième pas."
     )
-    assert history[3] < profile["low_threshold_sim_pct"], (
+    assert history[3] < profile["moist_low_pct"], (
         "L'humidité doit être sous le seuil bas au troisième pas."
     )
 

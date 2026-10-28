@@ -3,6 +3,7 @@
 Le broker local doit fonctionner. Aucun fichier de données du projet n'est effacé.
 Les commandes ciblent seulement la session créée par cette recette.
 """
+from greenmind.identifiers import next_id
 
 import os
 from pathlib import Path
@@ -10,7 +11,6 @@ import subprocess
 import sys
 import tempfile
 from time import monotonic, sleep
-from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -72,59 +72,59 @@ def main():
                 def plants():
                     return {p['plant_id']: p for p in client.get('/api/v1/plants').json()}
                 def revision():
-                    return max(p['state_revision'] for p in plants().values())
+                    return max(p['current_state'] for p in plants().values())
                 def inject(plant, moisture):
                     response = client.post('/api/v1/simulation/controls', json={
-                        'action': 'SET_SOIL_MOISTURE', 'plant_id': plant,
-                        'value': moisture, 'expected_revision': revision(),
+                        'action': 'modifier_humidite_sol', 'plant_id': plant,
+                        'moist_request_pct': moisture, 'expected_state': revision(),
                     })
                     require(response.status_code == 202, f'Forçage refusé : {response.text}')
                     control_id = response.json()['control_id']
-                    wait_for(lambda: client.get(f'/api/v1/simulation/controls/{control_id}').json()['status'] == 'APPLIED', 'forçage appliqué')
-                    wait_for(lambda: plants()[plant]['soil_moisture_sim_pct'] == moisture, 'mesure forcée')
+                    wait_for(lambda: client.get(f'/api/v1/simulation/controls/{control_id}').json()['status'] == 'appliqué', 'forçage appliqué')
+                    wait_for(lambda: plants()[plant]['soil_moisture_pct'] == moisture, 'mesure forcée')
 
                 # Le broker confirme le transport, mais aucun simulateur ne
                 # reçoit cette publication sur un topic de test sans abonné.
                 class NoConsumerPublisher:
                     def publish_watering(self, plant, payload):
-                        publisher._publish('greenmind/v2/tests/no-consumer', payload)
-                inject('thym_01', 10.0)
-                proposal = client.post('/api/v1/plants/thym_01/watering-proposals', json={}).json()
+                        publisher._publish('greenmind/v3/tests/no-consumer', payload)
+                inject('thym', 10.0)
+                proposal = client.post('/api/v1/plants/thym/watering-proposals', json={}).json()
                 app.dependency_overrides[get_publisher] = lambda: NoConsumerPublisher()
-                pending = client.post('/api/v1/plants/thym_01/watering-commands', json={
-                    'proposal_id': proposal['proposal_id'], 'command_id': str(uuid4()),
+                pending = client.post('/api/v1/plants/thym/watering-commands', json={
+                    'proposal_id': proposal['proposal_id'], 'command_id': next_id("command"),
                 })
                 require(pending.status_code == 202, f'Confirmation de test refusée : {pending.text}')
                 app.dependency_overrides[get_publisher] = lambda: publisher
                 timeout_id = pending.json()['command_id']
                 wait_for(lambda: client.get(f'/api/v1/watering-commands/{timeout_id}').json()['status'] == 'TIMED_OUT',
                          'timeout sans acquittement métier')
-                blocked = client.post('/api/v1/simulation/controls', json={'action': 'ADVANCE', 'expected_revision': revision()})
+                blocked = client.post('/api/v1/simulation/controls', json={'action': 'avancer_1_heure', 'expected_state': revision()})
                 require(blocked.status_code == 409, 'Mutation acceptée pendant une exécution incertaine.')
                 with Session(db) as session:
                     expired = session.get(WateringCommandRow, timeout_id).payload
-                publisher.publish_watering('thym_01', expired)
-                wait_for(lambda: client.get(f'/api/v1/watering-commands/{timeout_id}').json()['status'] == 'REJECTED',
+                publisher.publish_watering('thym', expired)
+                wait_for(lambda: client.get(f'/api/v1/watering-commands/{timeout_id}').json()['status'] == 'refusé',
                          'refus tardif corrélé de la commande expirée')
                 print('OK : PUBACK sans effet, timeout, mutations bloquées et refus tardif corrélé.', flush=True)
-                for plant, moisture in {'basilic_01': 20.0, 'thym_01': 10.0, 'romarin_01': 15.0}.items():
+                for plant, moisture in {'basilic': 20.0, 'thym': 10.0, 'romarin': 15.0}.items():
                     inject(plant, moisture)
                     before = plants()
                     state_before = client.get('/api/v1/simulation').json()
                     response = client.post(f'/api/v1/plants/{plant}/watering-proposals', json={})
                     require(response.status_code == 201, f'Proposition refusée : {response.text}')
                     proposal = response.json()
-                    require(plants()[plant]['state_revision'] == before[plant]['state_revision'], 'La proposition a modifié la serre.')
-                    payload = {'proposal_id': proposal['proposal_id'], 'command_id': str(uuid4())}
+                    require(plants()[plant]['current_state'] == before[plant]['current_state'], 'La proposition a modifié la serre.')
+                    payload = {'proposal_id': proposal['proposal_id'], 'command_id': next_id("command")}
                     url = f'/api/v1/plants/{plant}/watering-commands'
                     response = client.post(url, json=payload)
                     require(response.status_code == 202, f'Confirmation refusée : {response.text}')
                     key = payload['command_id']
                     def executed():
                         data = client.get(f'/api/v1/watering-commands/{key}').json()
-                        if data['status'] in ('REJECTED', 'TIMED_OUT'):
+                        if data['status'] in ('refusé', 'TIMED_OUT'):
                             raise RuntimeError(f'Arrosage non exécuté : {data}')
-                        return data if data['status'] == 'EXECUTED' and not data['measurement_pending'] else None
+                        return data if data['status'] == 'exécuté' and not data['measurement_pending'] else None
                     result = wait_for(executed, 'acquittement métier et mesure après arrosage')
                     require(client.post(url, json=payload).status_code == 202, 'Rejeu REST refusé.')
                     with Session(db) as session:
@@ -133,24 +133,24 @@ def main():
                     publisher.publish_watering(plant, command.model_dump_json())
                     sleep(0.3)
                     after = plants()
-                    require(after[plant]['state_revision'] == result['resulting_revision'], 'Doublon appliqué deux fois.')
-                    require(after[plant]['soil_moisture_sim_pct'] == proposal['soil_moisture_after_pct'], 'Gain incorrect.')
+                    require(after[plant]['current_state'] == result['resulting_state'], 'Doublon appliqué deux fois.')
+                    require(after[plant]['soil_moisture_pct'] == proposal['moist_after_pct'], 'Gain incorrect.')
                     require(not after[plant]['has_active_alert'], 'Alerte non clôturée après arrosage.')
-                    require(all(after[p]['soil_moisture_sim_pct'] == before[p]['soil_moisture_sim_pct'] for p in before if p != plant), 'Un autre bac a été modifié.')
-                    require(client.get('/api/v1/simulation').json()['simulated_tick'] == state_before['simulated_tick'], 'Arrosage ayant avancé l’heure météo.')
+                    require(all(after[p]['soil_moisture_pct'] == before[p]['soil_moisture_pct'] for p in before if p != plant), 'Un autre bac a été modifié.')
+                    require(client.get('/api/v1/simulation').json()['heure_virtuelle'] == state_before['heure_virtuelle'], 'Arrosage ayant avancé l’heure météo.')
                     events = client.get('/api/v1/events', params={'plant_id': plant}).json()
-                    require(sum(e['event_type'] == 'WATERING_EXECUTED' for e in events) == 1, 'Journal d’exécution dupliqué.')
-                    require(client.post(url, json={'proposal_id': proposal['proposal_id'], 'command_id': str(uuid4())}).status_code == 409, 'Proposition consommée réutilisable.')
+                    require(sum(e['event_type'] == 'arrosage_exécuté' for e in events) == 1, 'Journal d’exécution dupliqué.')
+                    require(client.post(url, json={'proposal_id': proposal['proposal_id'], 'command_id': next_id("command")}).status_code == 409, 'Proposition consommée réutilisable.')
                     inject(plant, moisture)
                     require(client.post(f'/api/v1/plants/{plant}/watering-proposals', json={}).status_code == 409, 'Repos du bac non respecté.')
                     print(f'OK : {plant}, proposition → confirmation → effet unique → ACK → mesure ; doublons, isolation et repos vérifiés.', flush=True)
                 # Refus effectif côté simulateur d'une commande expirée.
-                plant = 'basilic_01'
+                plant = 'basilic'
                 from datetime import datetime, timedelta, timezone
                 stale = WateringCommand(
-                    command_id=uuid4(), run_id=command.run_id, plant_id=plant,
-                    actuator_id='arroseur_basilic', duration_sim_s=10.0,
-                    expected_revision=revision(), requested_at=datetime.now(timezone.utc)-timedelta(seconds=20),
+                    command_id=next_id("command"), simulation=command.simulation, plant_id=plant,
+                    arroseur_id='arroseur_basilic', watering_duration_s=10.0,
+                    expected_state=revision(), requested_at=datetime.now(timezone.utc)-timedelta(seconds=20),
                     expires_at=datetime.now(timezone.utc)-timedelta(seconds=10),
                 )
                 # L'événement rejeté reste traçable, même pour un producteur de test sans intention REST.
@@ -162,7 +162,7 @@ def main():
                         return row if row else None
                 event = wait_for(rejected, 'refus MQTT d’une commande expirée')
                 from greenmind.schemas import WateringEvent
-                require(WateringEvent.model_validate_json(event.payload).status == 'REJECTED', 'Commande expirée acceptée.')
+                require(WateringEvent.model_validate_json(event.payload).status == 'refusé', 'Commande expirée acceptée.')
                 require(all(p.poll() is None for p in processes), 'Un service a quitté prématurément.')
                 passed = True
         except Exception as error:

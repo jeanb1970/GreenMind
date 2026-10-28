@@ -80,7 +80,7 @@ def main() -> int:
                     return rows if len(rows) == 3 else None
 
             rows = wait_for(initial_ready, "trois mesures initiales en base")
-            run_id = rows[0].run_id
+            simulation = rows[0].simulation
 
             # 2. Instanciation de l'API REST FastAPI avec le moteur SQLite du test
             app = create_app()
@@ -103,20 +103,20 @@ def main() -> int:
                 raise RuntimeError("Une alerte est anormalement active à l'état initial.")
             print("OK : trois bacs consultables via REST sans alerte initiale.", flush=True)
 
-            # Test 3 : GET /api/v1/plants/basilic_01 (détail et seuils)
-            res = client.get("/api/v1/plants/basilic_01")
-            if res.status_code != 200 or res.json().get("low_threshold_sim_pct") != 35.0:
-                raise RuntimeError(f"Échec /plants/basilic_01 : {res.text}")
+            # Test 3 : GET /api/v1/plants/basilic (détail et seuils)
+            res = client.get("/api/v1/plants/basilic")
+            if res.status_code != 200 or res.json().get("moist_low_pct") != 35.0:
+                raise RuntimeError(f"Échec /plants/basilic : {res.text}")
             print("OK : profil et seuils du bac vérifiés par REST.", flush=True)
 
             # Test 4 : Injection critique via POST /api/v1/simulation/controls
             # Thym seuil bas = 20 % -> injection à 18 %
-            current_rev = plants["basilic_01"]["state_revision"]
+            current_rev = plants["basilic"]["current_state"]
             res = client.post("/api/v1/simulation/controls", json={
-                "action": "SET_SOIL_MOISTURE",
-                "expected_revision": current_rev,
-                "plant_id": "thym_01",
-                "value": 18.0,
+                "action": "modifier_humidite_sol",
+                "expected_state": current_rev,
+                "plant_id": "thym",
+                "moist_request_pct": 18.0,
             })
             if res.status_code != 202:
                 raise RuntimeError(f"Échec POST control : {res.status_code} {res.text}")
@@ -125,7 +125,7 @@ def main() -> int:
             # Attendre acquittement APPLIED via GET /api/v1/simulation/controls/{control_id}
             def control_applied():
                 r = client.get(f"/api/v1/simulation/controls/{control_id}")
-                return r.json() if r.json().get("status") == "APPLIED" else None
+                return r.json() if r.json().get("status") == "appliqué" else None
 
             wait_for(control_applied, "application du contrôle de forçage thym")
 
@@ -133,54 +133,54 @@ def main() -> int:
             # l'évolution de révision et conserver son acquittement APPLIED.
             retry = client.post("/api/v1/simulation/controls", json={
                 "control_id": control_id,
-                "action": "SET_SOIL_MOISTURE",
-                "expected_revision": current_rev,
-                "plant_id": "thym_01",
-                "value": 18.0,
+                "action": "modifier_humidite_sol",
+                "expected_state": current_rev,
+                "plant_id": "thym",
+                "moist_request_pct": 18.0,
             })
             if retry.status_code != 202 or not control_applied():
                 raise RuntimeError("Le rejeu idempotent du contrôle REST a échoué.")
             collision = client.post("/api/v1/simulation/controls", json={
                 "control_id": control_id,
-                "action": "SET_SOIL_MOISTURE",
-                "expected_revision": current_rev,
-                "plant_id": "thym_01",
-                "value": 19.0,
+                "action": "modifier_humidite_sol",
+                "expected_state": current_rev,
+                "plant_id": "thym",
+                "moist_request_pct": 19.0,
             })
             if collision.status_code != 409:
                 raise RuntimeError("Une clé de contrôle réutilisée avec un autre contenu doit être refusée.")
             print("OK : rejeu REST idempotent après acquittement ; collision de clé refusée.", flush=True)
 
             # Test 5 : Vérification de l'alerte ouverte via l'API REST
-            res_thym = client.get("/api/v1/plants/thym_01")
+            res_thym = client.get("/api/v1/plants/thym")
             thym_data = res_thym.json()
             if not thym_data.get("has_active_alert"):
                 raise RuntimeError("L'alerte de sécheresse du thym n'est pas ouverte via l'API.")
             alert = thym_data.get("active_alert")
-            if alert is None or alert.get("status") != "OPEN" or alert.get("trigger_moisture_pct") != 18.0:
+            if alert is None or alert.get("status") != "ouverte" or alert.get("moist_trigger_pct") != 18.0:
                 raise RuntimeError(f"Alerte thym incohérente : {alert}")
 
             # Vérifier l'isolation : basilic et romarin ne doivent pas être en alerte
-            if client.get("/api/v1/plants/basilic_01").json().get("has_active_alert"):
+            if client.get("/api/v1/plants/basilic").json().get("has_active_alert"):
                 raise RuntimeError("Alerte propagée à tort au basilic.")
             print("OK : forçage 18 % -> ouverture d'alerte atomique sur le thym ; isolation vérifiée.", flush=True)
 
             # Test 6 : Vérification du journal des événements via GET /api/v1/events
-            res_events = client.get("/api/v1/events?plant_id=thym_01")
+            res_events = client.get("/api/v1/events?plant_id=thym")
             if res_events.status_code != 200:
                 raise RuntimeError(f"Échec /events : {res_events.text}")
             events = res_events.json()
-            if not any(e["event_type"] == "ALERT_OPENED" for e in events):
+            if not any(e["event_type"] == "alerte_ouverte" for e in events):
                 raise RuntimeError("Événement ALERT_OPENED absent du journal.")
             print("OK : journal des événements filtrable et traçable en base.", flush=True)
 
             # Test 7 : Réarmement et clôture d'alerte (injection à 30 % > seuil réarmement 25 %)
-            rev_after_first = client.get("/api/v1/plants/basilic_01").json()["state_revision"]
+            rev_after_first = client.get("/api/v1/plants/basilic").json()["current_state"]
             res = client.post("/api/v1/simulation/controls", json={
-                "action": "SET_SOIL_MOISTURE",
-                "expected_revision": rev_after_first,
-                "plant_id": "thym_01",
-                "value": 30.0,
+                "action": "modifier_humidite_sol",
+                "expected_state": rev_after_first,
+                "plant_id": "thym",
+                "moist_request_pct": 30.0,
             })
             if res.status_code != 202:
                 raise RuntimeError(f"Échec réarmement control : {res.text}")
@@ -188,17 +188,17 @@ def main() -> int:
 
             def rearm_applied():
                 r = client.get(f"/api/v1/simulation/controls/{rearm_id}")
-                return r.json() if r.json().get("status") == "APPLIED" else None
+                return r.json() if r.json().get("status") == "appliqué" else None
 
             wait_for(rearm_applied, "application réarmement thym")
 
             # Vérifier clôture de l'alerte
-            res_thym_rearmed = client.get("/api/v1/plants/thym_01")
+            res_thym_rearmed = client.get("/api/v1/plants/thym")
             if res_thym_rearmed.json().get("has_active_alert"):
                 raise RuntimeError("L'alerte du thym aurait dû être fermée après 30 % d'humidité.")
 
-            res_events_rearmed = client.get("/api/v1/events?plant_id=thym_01")
-            if not any(e["event_type"] == "ALERT_CLOSED" for e in res_events_rearmed.json()):
+            res_events_rearmed = client.get("/api/v1/events?plant_id=thym")
+            if not any(e["event_type"] == "alerte_clôturée" for e in res_events_rearmed.json()):
                 raise RuntimeError("Événement ALERT_CLOSED absent après réarmement.")
             print("OK : réarmement 30 % -> clôture atomique de l'alerte et consignation au journal.", flush=True)
 
@@ -206,8 +206,8 @@ def main() -> int:
             if client.get("/api/v1/plants/inconnu").status_code != 404:
                 raise RuntimeError("404 attendue pour bac inconnu.")
             conflict_res = client.post("/api/v1/simulation/controls", json={
-                "action": "ADVANCE",
-                "expected_revision": 0,  # Révision périmée
+                "action": "avancer_1_heure",
+                "expected_state": 0,  # Révision périmée
             })
             if conflict_res.status_code != 409:
                 raise RuntimeError("409 attendue pour conflit de révision.")

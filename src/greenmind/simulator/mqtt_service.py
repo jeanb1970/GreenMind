@@ -10,15 +10,15 @@ from time import monotonic
 from uuid import uuid4
 import paho.mqtt.client as mqtt
 from greenmind.greenhouse_config import load_greenhouse_config
-from greenmind.schemas import SimulationControl, WateringCommand, parse_v2, telemetry_for_snapshot
+from greenmind.schemas import SimulationControl, WateringCommand, parse_v3, telemetry_for_snapshot
 from greenmind.simulator.controls import ControlProcessor
 from greenmind.simulator.watering import WateringProcessor
 from greenmind.simulator.engine import SimulationEngine
 from greenmind.simulator.weather import load_weather
 
 ROOT = Path(__file__).resolve().parents[3]
-CONTROL_TOPIC = "greenmind/v2/simulation/controls"
-EVENT_TOPIC = "greenmind/v2/simulation/events"
+CONTROL_TOPIC = "greenmind/v3/simulation/controls"
+EVENT_TOPIC = "greenmind/v3/simulation/events"
 LOGGER = logging.getLogger("greenmind.simulator")
 
 def main() -> int:
@@ -55,7 +55,7 @@ def main() -> int:
             if reason_code.is_failure:
                 failed.set()
             else:
-                rc, _ = c.subscribe([(CONTROL_TOPIC, 1), ('greenmind/v2/plants/+/commands', 1)])
+                rc, _ = c.subscribe([(CONTROL_TOPIC, 1), ('greenmind/v3/plants/+/commands', 1)])
                 if rc != mqtt.MQTT_ERR_SUCCESS:
                     failed.set()
         def on_subscribe(c, userdata, mid, reason_codes, properties):
@@ -68,10 +68,10 @@ def main() -> int:
                 if message.retain:
                     raise ValueError("Un contrôle retained est interdit.")
                 if message.topic == CONTROL_TOPIC:
-                    command = parse_v2(SimulationControl, message.payload)
+                    command = parse_v3(SimulationControl, message.payload)
                 else:
-                    command = parse_v2(WateringCommand, message.payload)
-                    if message.topic != f"greenmind/v2/plants/{command.plant_id}/commands":
+                    command = parse_v3(WateringCommand, message.payload)
+                    if message.topic != f"greenmind/v3/plants/{command.plant_id}/commands":
                         raise ValueError("Topic d'arrosage incohérent avec le bac ciblé.")
                 pending.put_nowait(command)
             except ValueError as error:
@@ -104,12 +104,12 @@ def main() -> int:
                 raise RuntimeError("Publication non confirmée par le broker ; arrêt du scénario.")
         def publish_state(messages, event):
             for message in messages:
-                publish(f"greenmind/v2/plants/{message.plant_id}/telemetry", message)
+                publish(f"greenmind/v3/plants/{message.plant_id}/telemetry", message)
             publish(EVENT_TOPIC, event)
         if stop.is_set():
             return 0
         publish_state(telemetry_for_snapshot(engine.snapshot(), "initial"), processor.state_event())
-        LOGGER.info("Simulateur prêt en pause | exécution : %s", engine.snapshot().run_id)
+        LOGGER.info("Simulateur prêt en pause | exécution : %s", engine.snapshot().simulation)
         next_heartbeat = monotonic() + 5
         while not stop.wait(0.05):
             if failed.is_set():
@@ -123,9 +123,9 @@ def main() -> int:
                     result = watering.apply(control)
                     # ACK d'abord : le suivi distingue explicitement une mesure
                     # encore en transit d'une exécution non confirmée.
-                    publish(f"greenmind/v2/plants/{control.plant_id}/events", result.event)
+                    publish(f"greenmind/v3/plants/{control.plant_id}/events", result.event)
                     for message in result.telemetry:
-                        publish(f"greenmind/v2/plants/{message.plant_id}/telemetry", message)
+                        publish(f"greenmind/v3/plants/{message.plant_id}/telemetry", message)
                     publish(EVENT_TOPIC, processor.state_event())
                     LOGGER.info("Arrosage %s : %s", control.command_id, result.event.status)
                 else:
@@ -134,10 +134,10 @@ def main() -> int:
                     LOGGER.info("Contrôle %s : %s", control.control_id, result.event.status)
             transition = engine.poll()
             if transition is not None:
-                publish_state(telemetry_for_snapshot(transition.after, "model"), processor.state_event())
+                publish_state(telemetry_for_snapshot(transition.after, "calcul_horaire"), processor.state_event())
                 next_heartbeat = monotonic() + 5
             elif monotonic() >= next_heartbeat:
-                publish_state(telemetry_for_snapshot(engine.snapshot(), "heartbeat"), processor.state_event())
+                publish_state(telemetry_for_snapshot(engine.snapshot(), "signal_presence"), processor.state_event())
                 next_heartbeat = monotonic() + 5
         return 0
     except (ValueError, RuntimeError, OSError):

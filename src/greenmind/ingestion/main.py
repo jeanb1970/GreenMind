@@ -18,8 +18,8 @@ from greenmind.ingestion.handler import ingest_telemetry
 
 LOGGER = logging.getLogger("greenmind.ingestion")
 
-TELEMETRY_TOPICS = [("greenmind/v2/plants/+/telemetry", 1), ("greenmind/v2/simulation/events", 1),
-                    ("greenmind/v2/plants/+/events", 1)]
+TELEMETRY_TOPICS = [("greenmind/v3/plants/+/telemetry", 1), ("greenmind/v3/simulation/events", 1),
+                    ("greenmind/v3/plants/+/events", 1)]
 STARTUP_TIMEOUT_S = 10.0
 CONNECTION_TIMEOUT_S = 5.0
 

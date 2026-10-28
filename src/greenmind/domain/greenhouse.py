@@ -9,7 +9,7 @@ from greenmind.greenhouse_config import GreenhouseConfig
 def initial_soil_state(config: GreenhouseConfig) -> dict[str, float]:
     """Retourne un nouvel état, indépendant des autres exécutions."""
     return {
-        plant.plant_id: plant.initial_soil_moisture_sim_pct
+        plant.plant_id: plant.moist_initial_pct
         for plant in config.plants
     }
 
@@ -30,7 +30,7 @@ def dry_greenhouse_one_hour(
     return {
         plant.plant_id: dry_one_tick(
             soil_state[plant.plant_id], air_temperature_c, air_humidity_pct,
-            base_evaporation_per_tick=plant.base_evaporation_per_hour,
+            base_evaporation_per_tick=plant.evaporation_pct_per_hour,
             reference_temperature_c=plant.reference_temperature_c,
             temperature_factor_per_c=plant.temperature_factor_per_c,
         )

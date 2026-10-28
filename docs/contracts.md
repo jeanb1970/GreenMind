@@ -1,269 +1,190 @@
-# Contrats techniques GreenMind v1.4
+# Contrats techniques GreenMind — schéma 3
 
-> Ce document décrit les contrats d'échanges techniques de la version 1.4 de GreenMind. Tous les échanges réseau utilisent `schema_version: 2` et le préfixe de topic `greenmind/v2`. Les contrats v1.3 antérieurs sont obsolètes et ne sont plus acceptés par le système.
+Le dictionnaire [Nommage_champs_valide.md](Nommage_champs_valide.md) donne les
+anciens noms et les noms retenus. Le présent contrat décrit le format utilisé.
+L’API applicative reste sous `/api/v1`, indépendamment de la version MQTT.
 
-## 1. Principes généraux d'échange
+## Transport et validation
 
-1. **Transport MQTT** :
-   - Broker local Mosquitto (`127.0.0.1:1883`).
-   - Qualité de service : **QoS 1** sur tous les flux.
-   - Messages retenus : **interdits** (`retain=False`). Tout message reçu avec le drapeau *retained* est immédiatement rejeté.
-   - Sessions non persistantes (`clean_session=True`).
-   - Format : objet JSON encodé en UTF-8.
-2. **Validation stricte** :
-   - Implémentée via Pydantic (`strict=True`, `extra="forbid"`, `frozen=True`, pas de NaN/Inf).
-   - Les champs inconnus ou non autorisés entraînent un rejet strict sans écriture en base.
-   - Les dates sont sérialisées au format ISO 8601 avec fuseau horaire explicite normalisé en UTC (`Z`).
-3. **Identité, sessions et révisions** :
-   - Chaque exécution du simulateur génère un identifiant de session unique (`run_id` au format UUID v4).
-   - Chaque message porte son propre identifiant d'événement (`event_id` au format UUID v4).
-   - L'état de la serre est ordonné par un compteur monotone de révision (`state_revision`). Une révision antérieure reçue en retard ne remplace jamais un état plus récent en base de données SQLite.
-   - L'ingestion dédoublonne les messages via la contrainte d'unicité `PRIMARY KEY (event_id)` en base.
-   - Une télémétrie tardive reste dans l'historique, mais ne modifie pas les alertes ou le journal si elle précède l'état courant du bac (ordre : révision, émission UTC, identifiant d'événement).
-4. **Langue des messages** :
-   - Tous les messages de motif, statuts textuels et diagnostics fonctionnels sont rédigés en français (ENF-11). Les identifiants techniques restent stables.
+- Mosquitto local : `127.0.0.1:1883`, MQTT QoS 1, sessions non persistantes.
+- Préfixe `greenmind/v3`, champ `schema_version: 3` explicite et obligatoire.
+- Les anciens topics et schémas ne sont pas acceptés par les consommateurs v3.
+- JSON UTF-8 strict : champs supplémentaires, types incorrects, NaN/Inf et valeurs
+  hors limites sont refusés. Les messages reçus avec le drapeau retained sont rejetés.
+- Un PUBACK confirme le transport ; seul un acquittement métier confirme l’effet.
+- Les pertes durant une déconnexion ne sont pas automatiquement récupérées par une
+  session MQTT non persistante. Le simulateur s’arrête sur perte de connexion.
 
----
+## Identifiants persistants
 
-## 2. Flux de télémétrie des plantes
-
-Le simulateur publie périodiquement l'état de chacun des trois bacs configurés (`basilic_01`, `thym_01`, `romarin_01`).
-
-### Transport
-
-- Topic : `greenmind/v2/plants/{plant_id}/telemetry`
-- QoS : 1, `retain=False`
-- Fréquence : à chaque pas horaire simulé, lors d'un forçage manuel, après un arrosage, ou toutes les 5 secondes en pause (*heartbeat* de présence).
-
-### Champs obligatoires
-
-| Champ | Type JSON | Contraintes et règles |
-|---|---|---|
-| `schema_version` | entier | Fixé à `2`. |
-| `event_id` | chaîne | UUID v4 unique pour chaque émission de message. |
-| `run_id` | chaîne | UUID v4 identifiant la session courante du simulateur. |
-| `plant_id` | chaîne | Identifiant du bac : `basilic_01`, `thym_01` ou `romarin_01`. Doit correspondre au token du topic MQTT. |
-| `observed_at` | chaîne | Horodatage ISO 8601 UTC de l'intervalle météo consommé. |
-| `simulated_at` | chaîne | Heure virtuelle courante de la serre (ISO 8601 UTC). Égale à `observed_at` au pas 0, puis `observed_at + 1 heure` au pas horaire. |
-| `emitted_at` | chaîne | Heure réelle UTC de fabrication du message. |
-| `simulated_tick` | entier | Entier compris entre `0` (initial) et `24` (fin de journée). |
-| `state_revision` | entier | Compteur de révision d'état, supérieur ou égal à `simulated_tick`. |
-| `paused` | booléen | Indique si le moteur temporel de simulation est en pause. |
-| `completed` | booléen | Vrai uniquement au pas 24 (journée terminée, obligatoirement en pause). |
-| `air_temperature_c` | nombre | Température ambiante de l'air en degrés Celsius (valeur finie). |
-| `air_humidity_pct` | nombre | Humidité de l'air en pourcentage, valeur finie dans `[0.0, 100.0]`. |
-| `soil_moisture_sim_pct` | nombre | Humidité du sol simulée en pourcentage, valeur finie dans `[0.0, 100.0]`. |
-| `pump_active` | booléen | État de l'actionneur d'arrosage du bac. |
-| `provenance` | chaîne | `synthetic_weather_plus_synthetic_soil` ou `historical_weather_plus_synthetic_soil`. |
-| `measurement_origin` | chaîne | Origine de l'état : `initial`, `model`, `manual_override`, `watering`, ou `heartbeat`. |
-
-### Cohérence d'état
-
-- Au démarrage (`measurement_origin == "initial"`), `simulated_tick == 0` et `state_revision == 0`.
-- Lorsque `completed == true`, `simulated_tick` doit valoir 24 et `paused` doit être `true`.
-- Tout message reçu dont le `plant_id` ne correspond pas exactement au topic MQTT d'émission est rejeté.
-
-### Exemple illustratif de télémétrie
-
-```json
-{
-  "schema_version": 2,
-  "event_id": "7f093206-8d1f-4efc-8b83-b097ef7ff894",
-  "run_id": "95914fa0-6893-424f-9e79-cfc0be9ff99a",
-  "plant_id": "basilic_01",
-  "observed_at": "2026-07-10T00:00:00Z",
-  "simulated_at": "2026-07-10T00:00:00Z",
-  "emitted_at": "2026-10-27T18:45:00.123456Z",
-  "simulated_tick": 0,
-  "state_revision": 0,
-  "paused": true,
-  "completed": false,
-  "air_temperature_c": 20.0,
-  "air_humidity_pct": 75.0,
-  "soil_moisture_sim_pct": 50.0,
-  "pump_active": false,
-  "provenance": "synthetic_weather_plus_synthetic_soil",
-  "measurement_origin": "initial"
-}
-```
-
----
-
-## 3. Flux des commandes de simulation
-
-Les contrôles de l'horloge et de la serre sont émis par les services autorisés (scripts de test, API backend ou console) vers le simulateur.
-
-### Transport
-
-- Topic : `greenmind/v2/simulation/controls`
-- QoS : 1, `retain=False`
-
-### Champs obligatoires
-
-| Champ | Type JSON | Contraintes et règles |
-|---|---|---|
-| `schema_version` | entier | Fixé à `2`. |
-| `control_id` | chaîne | UUID v4 identifiant la commande (clé d'idempotence). |
-| `run_id` | chaîne | UUID v4 de la session visée. Si différent du `run_id` courant du simulateur, la commande est refusée. |
-| `expected_revision` | entier | Révision attendue de la serre avant application. Si différente de la révision courante, la commande est rejetée (`REJECTED`) pour prévenir les conflits concurrents. |
-| `action` | chaîne | Action demandée : `PAUSE`, `RESUME`, `ADVANCE` ou `SET_SOIL_MOISTURE`. |
-| `requested_at` | chaîne | Date réelle de demande (ISO 8601 UTC). |
-| `expires_at` | chaîne | Date réelle d'expiration (ISO 8601 UTC). Doit être comprise entre `0` et `60` secondes après `requested_at`. |
-| `plant_id` | chaîne \| null | Obligatoire si `action == "SET_SOIL_MOISTURE"`, interdit (`null`) sinon. |
-| `value` | nombre \| null | Obligatoire si `action == "SET_SOIL_MOISTURE"` (flottant entre `0.0` et `100.0`), interdit (`null`) sinon. |
-
-### Traitement et idempotence
-
-- Le simulateur traite les commandes sur un seul thread d'exécution.
-- Si une commande portant un `control_id` déjà traité est reçue à nouveau (ex. retransmission QoS 1), le simulateur republie le résultat précédent sans réexécuter l'action.
-- Si l'heure réelle courante dépasse `expires_at`, la commande est rejetée.
-- `ADVANCE` avance la simulation d'exactement une heure (+1 tick) et n'est autorisée qu'en mode pause.
-- `SET_SOIL_MOISTURE` modifie immédiatement l'humidité du bac désigné (créant une nouvelle révision d'état avec `measurement_origin: manual_override`), sans affecter les deux autres bacs.
-
-### Exemple illustratif de commande
-
-```json
-{
-  "schema_version": 2,
-  "control_id": "c1f7a42b-5867-4e3e-bf6e-63f52479e083",
-  "run_id": "95914fa0-6893-424f-9e79-cfc0be9ff99a",
-  "expected_revision": 0,
-  "action": "SET_SOIL_MOISTURE",
-  "requested_at": "2026-10-27T18:45:10Z",
-  "expires_at": "2026-10-27T18:45:40Z",
-  "plant_id": "thym_01",
-  "value": 18.0
-}
-```
-
----
-
-## 4. Flux des événements et acquittements de simulation
-
-À chaque transition ou en réponse à une commande, le simulateur publie un événement corrélé.
-
-### Transport
-
-- Topic : `greenmind/v2/simulation/events`
-- QoS : 1, `retain=False`
-
-### Champs obligatoires
-
-| Champ | Type JSON | Contraintes et règles |
-|---|---|---|
-| `schema_version` | entier | Fixé à `2`. |
-| `event_id` | chaîne | UUID v4 propre à l'événement émis. |
-| `run_id` | chaîne | UUID v4 de la session courante. |
-| `control_id` | chaîne \| null | UUID v4 de la commande ayant produit l'événement, ou `null` pour un événement périodique d'état (*heartbeat* ou transition d'horloge). |
-| `status` | chaîne | `STATE` (état courant régulier), `APPLIED` (contrôle exécuté avec succès) ou `REJECTED` (contrôle refusé). |
-| `state_revision` | entier | Révision d'état résultante. |
-| `simulated_tick` | entier | Pas horaire courant (0 à 24). |
-| `simulated_at` | chaîne | Heure virtuelle courante (ISO 8601 UTC). |
-| `emitted_at` | chaîne | Heure réelle UTC d'émission. |
-| `paused` | booléen | État de pause courant. |
-| `completed` | booléen | État de fin de journée courant. |
-| `reason` | chaîne | Message explicatif en français décrivant l'état ou le motif d'acceptation/refus. |
-
-### Exemple illustratif d'acquittement
-
-```json
-{
-  "schema_version": 2,
-  "event_id": "58e2e291-0bd3-4194-9dd7-9d45d1582661",
-  "run_id": "95914fa0-6893-424f-9e79-cfc0be9ff99a",
-  "control_id": "c1f7a42b-5867-4e3e-bf6e-63f52479e083",
-  "status": "APPLIED",
-  "state_revision": 1,
-  "simulated_tick": 0,
-  "simulated_at": "2026-07-10T00:00:00Z",
-  "emitted_at": "2026-10-27T18:45:10.250000Z",
-  "paused": true,
-  "completed": false,
-  "reason": "Humidité du sol imposée à 18.0 % sur thym_01."
-}
-```
-
----
-
-## 5. Arrosage et API applicative
-
-### 5.1. Commandes et acquittements d'arrosage (B5)
-
-Le parcours exige deux appels distincts : demande de proposition, puis confirmation
-explicite de son identifiant. Une proposition ne publie rien sur MQTT.
-
-- `POST /api/v1/plants/{plant_id}/watering-proposals` : corps `{}` ou
-  `{"proposal_id": "UUID"}` pour permettre un rejeu idempotent. Retour `201` :
-  proposition, session, révision, durée virtuelle, humidités avant/après prévues,
-  motif, indicateur `capped` et expiration réelle à 60 secondes.
-- `POST /api/v1/plants/{plant_id}/watering-commands` : corps
-  `{"proposal_id": "UUID", "command_id": "UUID"}`. `command_id` est optionnel,
-  mais le client doit le conserver pour rejouer sa confirmation. Retour `202`
-  avec l'identifiant et le suivi courant ; ce code ne prouve pas l'exécution.
-- `GET /api/v1/watering-commands/{command_id}` : état persistant, motif,
-  révision résultante et `measurement_pending`. Une commande inconnue donne `404`.
-
-La confirmation revalide session, révision, humidité sous le seuil bas, fraîcheur
-d'émission de moins de 10 secondes et repos réel de 60 secondes par bac. Les bacs
-doivent être synchronisés sur la révision courante. Une proposition est consommée
-une seule fois. Une présence sans changement de révision ne l'invalide pas.
-La durée est `min(max_duration, (cible - humidité) / gain)` ; sa limite de dix
-secondes virtuelles et l'éventuel écart à la cible sont visibles dès la proposition.
-
-**Commande MQTT** — `greenmind/v2/plants/{plant_id}/commands`, QoS 1, non retenue :
-
-| Champ | Contrainte |
+| Champ | Exemple |
 |---|---|
-| `schema_version` | `2`, explicite sur le réseau |
-| `command_id`, `run_id` | UUID de la demande et de l'exécution visée |
-| `plant_id`, `actuator_id` | Correspondance exacte entre topic, bac et configuration |
-| `duration_sim_s` | Nombre fini strictement positif, au plus 10 secondes virtuelles |
-| `expected_revision` | Entier positif ou nul, égal à la révision du moteur |
-| `requested_at`, `expires_at` | Dates réelles avec fuseau ; expiration API à 10 secondes, contrat réseau au plus 60 secondes |
+| `simulation` | `Simu_001 du 28 Oct. 2026 à 14:30` |
+| `event_id` | `Evenement_000001` |
+| `control_id` | `Controle_000001` |
+| `command_id` | `Arrosage_000001` |
+| `proposal_id` | `Proposition_000001` |
+| `alert_id` | `Alerte_000001` |
 
-**Acquittement MQTT** — `greenmind/v2/plants/{plant_id}/events`, QoS 1, non retenu :
+Les compteurs sont partagés entre les processus dans `outputs/identifiers.sqlite`
+(`GREENMIND_IDENTIFIERS_PATH` pour un autre emplacement). Leur incrément est atomique.
+Chaque catégorie a son compteur, conservé entre sessions et reconstructions de la
+base de serre. Les largeurs sont des minimums : trois chiffres pour la simulation,
+six pour les autres identifiants. Des réservations abandonnées peuvent laisser des
+trous ; les numéros ne sont pas réutilisés. La date de simulation est son démarrage
+réel en heure belge, avec mois français, et reste fixe pendant toute la session.
 
-| Champ | Contrainte |
+Les clients peuvent réserver une clé avec `POST /api/v1/identifiers/{category}`,
+`category` valant `control`, `proposal` ou `command`. La réponse contient
+`identifier`. Une tentative répétée conserve la même clé et le même contenu.
+Les identifiants fournis et validés font avancer la borne du compteur au besoin,
+pour éviter une réallocation ultérieure. Les identifiants techniques des connexions
+MQTT ne sont pas les identifiants métier des échanges.
+
+## Dates et horloges
+
+| Champs | Exemple |
 |---|---|
-| `schema_version` | `2` |
-| `event_id`, `command_id`, `run_id` | UUID de l'événement, de la commande et de la session du simulateur |
-| `plant_id`, `actuator_id` | Bac et arroseur concordants avec le topic et la configuration |
-| `status` | `APPLIED` ou `REJECTED` |
-| `resulting_revision` | Révision après application ou refus |
-| `simulated_at`, `emitted_at` | Heure virtuelle inchangée et date réelle du résultat |
-| `soil_moisture_after_pct` | Humidité après traitement, entre 0 et 100 |
-| `duration_applied_sim_s` | Durée positive si appliqué, zéro si refusé |
-| `reason` | Motif français |
+| `observed_at`, `simulated_at` | `2026-07-10 12:15:10` |
+| Autres champs temporels `*_at` | `2026-07-10 12:15:10.12345` |
 
-Le gain est instantané et virtuel ; il ne fait pas avancer le pas météo. Seul le
-bac ciblé reçoit l'origine `watering`, les deux autres une présence du même état.
-Le simulateur vérifie à nouveau session, révision, expiration, durée déterministe,
-seuil et repos. Les contrôles et arrosages passent par le même thread d'exécution.
-Un doublon identique renvoie exactement le résultat initial sans deuxième effet.
+Les chaînes représentent l’heure belge `Europe/Brussels`, sans `T`, `Z` ni
+suffixe de décalage. Les instants précis ont exactement cinq décimales ; la
+précision interne est ramenée à dix microsecondes pour garantir un aller-retour
+identique. Les calculs internes utilisent des dates avec fuseau normalisées en UTC.
+Une heure locale ambiguë ou inexistante au changement d’heure est refusée : le
+format sans décalage ne permet pas de distinguer les deux occurrences d’une heure.
+La journée météo simulée doit être une journée de 24 heures sans changement d’heure.
 
-Le cycle SQL est `PENDING → SENT → EXECUTED / REJECTED / TIMED_OUT`.
-L'intention et le journal sont persistés avant la publication ; `SENT` indique
-l'engagement de l'envoi, pas son exécution. Le délai de dix secondes est évalué
-à la consultation du suivi et lors des demandes d'arrosage. Un échec de publication
-retourne `503` avec `command_id` et conserve une exécution incertaine. Aucun rejeu
-REST d'une confirmation ni redémarrage de l'API ne republie un arrosage.
-Une même clé avec une autre proposition ou un autre bac retourne `409`.
+`observed_at` est le début de l’intervalle météo appliqué ; `simulated_at` est
+l’heure virtuelle courante. Elles sont égales au pas initial, puis séparées d’une
+heure après un pas horaire. Les délais d’expiration et de repos sont réels.
 
-Une seule commande peut être en cours dans la serre. Une commande incertaine
-bloque toute nouvelle mutation jusqu'à son acquittement tardif ou au redémarrage
-contrôlé de la simulation. Un acquittement `APPLIED` donne `EXECUTED` ; tant que la
-mesure correspondante n'est pas ingérée, `measurement_pending` reste vrai et les
-nouvelles mutations sont refusées. L'ingestion du résultat et la transition du
-suivi/journal forment une transaction. Les mesures et leurs alertes ont leur propre
-transaction atomique. Un acquittement tardif est corrélé et journalisé sans renvoi.
-Les tables `watering_proposals`, `watering_commands` et `watering_events` sont
-ajoutées sans supprimer les données v2 existantes.
+## Télémétrie
 
-### 5.2. Surface d'API REST applicative (B4)
+Topic : `greenmind/v3/plants/{plant_id}/telemetry`.
 
-- Préfixe d'accès : `/api/v1` (FastAPI sur `127.0.0.1:8000`).
-- Les mutations asynchrones publiées sur MQTT retournent `202 Accepted` avec identifiant de suivi, jamais une garantie immédiate d'effet physique.
-- Consultation de l'état : `/api/v1/plants`, `/api/v1/plants/{plant_id}`, `/api/v1/events` (borné côté serveur), `/api/v1/simulation`.
-- `POST /api/v1/simulation/controls` accepte une clé `control_id` optionnelle. La commande est conservée dans SQLite (`simulation_controls`) avant publication. Un rejeu identique retourne `202` et conserve le message MQTT original, dates et session comprises ; il reste accepté après changement de révision. Une même clé avec une autre action, révision attendue, valeur ou plante retourne `409`.
-- Avant acquittement, un rejeu republie exactement le message initial ; après acquittement, aucune nouvelle publication n'est nécessaire. Un échec de publication retourne `503` et conserve la commande pour un nouvel essai, sans prolonger son expiration. `GET /api/v1/simulation/controls/{control_id}` expose le résultat d'exécution.
-- L'API et l'ingestion respectent `GREENMIND_DATABASE_PATH`. La nouvelle table des contrôles est créée de façon additive sur les bases v2 existantes ; les bases v1 restent refusées sans migration explicite.
+| Champs | Règle |
+|---|---|
+| `schema_version`, `event_id`, `simulation` | Version 3 et identifiants ci-dessus |
+| `plant_id` | `basilic`, `thym` ou `romarin`, identique au topic |
+| `observed_at`, `simulated_at`, `emitted_at` | Formats belges ci-dessus |
+| `heure_virtuelle` | Entier 0–24 : nombre d’heures virtuelles écoulées |
+| `current_state` | Compteur entier de version, au moins égal à `heure_virtuelle` |
+| `paused`, `day_complete`, `arroseur_active` | Booléens |
+| `air_temperature_c` | Température finie en °C |
+| `air_humidity_pct`, `soil_moisture_pct` | Nombres entre 0 et 100 |
+| `provenance` | `meteo_simulee` ou `meteo_historique` ; sol toujours simulé |
+| `measurement_origin` | `initial`, `calcul_horaire`, `modification_manuelle`, `arrosage`, `signal_presence` |
+
+`day_complete` correspond au pas 24 et impose la pause. L’origine `initial`
+impose les compteurs à zéro. Chaque émission nouvelle reçoit un nouvel `event_id` ;
+un doublon identique est ignoré par SQLite. Une mesure tardive reste dans
+l’historique sans remplacer l’état courant ni rejouer ses transitions d’alerte.
+Un signal de présence est publié toutes les cinq secondes, sans dessèchement en pause.
+
+## Contrôles de simulation
+
+Topic commande : `greenmind/v3/simulation/controls`.
+
+Champs : `schema_version`, `control_id`, `simulation`, `expected_state`, `action`,
+`requested_at`, `expires_at`, `plant_id`, `moist_request_pct`.
+
+| Action | Arguments |
+|---|---|
+| `pause` | `plant_id` et `moist_request_pct` à `null` |
+| `reprendre` | Mêmes contraintes |
+| `avancer_1_heure` | Mêmes contraintes ; uniquement en pause |
+| `modifier_humidite_sol` | Bac et humidité demandée entre 0 et 100 ; uniquement en pause |
+
+Le simulateur vérifie la session, l’expiration et `expected_state`. L’expiration
+réseau est strictement positive et au plus 60 secondes après la demande ; l’API
+utilise 30 secondes. Un doublon exact retrouve le résultat d’origine sans effet
+supplémentaire. Une clé avec un autre contenu est refusée.
+
+Topic résultat : `greenmind/v3/simulation/events`.
+Champs : `schema_version`, `event_id`, `simulation`, `control_id` (ou `null`),
+`status`, `current_state`, `heure_virtuelle`, `simulated_at`, `emitted_at`,
+`paused`, `day_complete`, `reason`.
+Les statuts réseau sont `etat_actuel`, `appliqué` et `refusé`.
+
+L’API persiste le contrôle avant publication. Avant acquittement, un rejeu REST
+republie le message initial exact, dates comprises. Après acquittement, il retourne
+la même acceptation sans publication. Un échec MQTT retourne 503 ; la commande reste
+persistée pour une tentative explicite, sans prolongation de l’expiration.
+
+## Arrosage : proposition, confirmation et suivi
+
+- `POST /api/v1/plants/{plant_id}/watering-proposals` : corps `{}` ou avec
+  `proposal_id`. Retour 201 avec `simulation`, `current_state`, `plant_id`,
+  `watering_duration_s`, `moist_before_pct`, `moist_after_pct`, `duration_limited`,
+  `reason` et `expires_at`. Aucun effet ni publication MQTT.
+- `POST /api/v1/plants/{plant_id}/watering-commands` : `proposal_id` obligatoire,
+  `command_id` optionnel. Confirmation explicite ; retour 202 avec le suivi.
+- `GET /api/v1/watering-commands/{command_id}` : `status`, `reason`,
+  `resulting_state`, `measurement_pending`, session, bac, proposition et expiration.
+
+La confirmation revalide session, version, fraîcheur d’émission inférieure à dix
+secondes, synchronisation du bac et seuil bas. Une présence sans changement de
+version ne périme pas la proposition. La proposition expire après 60 secondes et
+n’est consommable qu’une fois. Durée :
+`min(watering_max_duration_s, (moist_target_pct - soil_moisture_pct) / watering_gain_pct_per_s)`.
+Le plafond est de dix secondes virtuelles ; la proposition indique si la cible ne
+sera pas atteinte. Le repos initial est de 60 secondes réelles par bac.
+
+Commande MQTT : `greenmind/v3/plants/{plant_id}/commands`.
+Champs : `schema_version`, `command_id`, `simulation`, `plant_id`, `arroseur_id`,
+`watering_duration_s`, `expected_state`, `requested_at`, `expires_at`.
+Le bac, le topic et l’arroseur doivent correspondre à la configuration.
+
+Acquittement MQTT : `greenmind/v3/plants/{plant_id}/events`.
+Champs : `schema_version`, `event_id`, `command_id`, `simulation`, `plant_id`,
+`arroseur_id`, `status` (`appliqué` ou `refusé`), `resulting_state`, `simulated_at`,
+`emitted_at`, `moist_after_pct`, `watering_applied_duration_s`, `reason`.
+Un refus indique une durée appliquée nulle. Le simulateur vérifie aussi le repos,
+la durée déterministe, la version et l’expiration avant d’appliquer un gain unique
+au bac ciblé. L’horloge météo reste inchangée. Contrôles et arrosages sont sérialisés.
+
+Cycle du suivi : `en_attente → envoyé → exécuté / refusé / TIMED_OUT`.
+L’intention est persistée avant envoi. Après dix secondes sans résultat, le suivi
+déclare l’exécution incertaine ; le timeout est évalué lors du suivi et des demandes.
+Aucun rejeu REST d’une confirmation ni redémarrage API ne republie l’arrosage.
+Un échec de publication retourne 503 avec `command_id` et conserve l’incertitude.
+Les mutations restent bloquées jusqu’au résultat tardif ou à une nouvelle session
+contrôlée. Après un ACK appliqué, `measurement_pending` reste vrai jusqu’à
+l’ingestion de la mesure correspondante. Une seule commande peut être en cours.
+
+## Alertes et journal
+
+Une alerte s’ouvre sous `moist_low_pct` et se clôture strictement au-dessus de
+`moist_rearm_pct`. Son statut est `ouverte` ou `clôturée`.
+`moist_trigger_pct` et `moist_resolved_pct` décrivent les valeurs aux transitions.
+La mesure et sa transition d’alerte sont atomiques. Le résultat d’arrosage et la
+transition du suivi/journal sont également atomiques.
+
+`GET /api/v1/events` renvoie au plus 100 événements, triés par `sequence`
+décroissante, avec filtre `plant_id`. Champs : `event_id`, `simulation`, `plant_id`,
+`created_at`, `simulated_at`, `event_type`, `summary`, `details`.
+Les libellés de `event_type` sont ceux du dictionnaire validé, notamment
+`alerte_ouverte`, `contrôle_appliqué`, `arrosage_exécuté`, `arrosage_TIMED_OUT`
+et `arrosage_sans_précommande`. `payload` conserve un message JSON complet en base.
+`consumed_by_command` relie la proposition à sa commande ; `late_ack` indique un
+résultat tardif.
+
+## API de consultation et santé
+
+`GET /api/v1/health` : `status` (`ok` / `dégradé`), `simulation`,
+`database_connected`, `mqtt_connected`, `simulation_mode`.
+`GET /plants`, `/plants/{plant_id}`, `/plants/{plant_id}/measurements`,
+`/simulation` et les routes de suivi sont sous le même préfixe `/api/v1`.
+Erreurs : 404 cible inconnue, 409 conflit/expiration/repos, 422 contenu invalide,
+503 dépendance indisponible. Les messages explicatifs sont en français.
+
+## SQLite et reconstruction
+
+Les anciens champs/valeurs ne sont pas migrés implicitement. Arrêter les services,
+puis exécuter `PYTHONPATH=src .venv/bin/python scripts/reset_database.py` pour
+reconstruire la base au schéma 3, sans sauvegarde de l’historique, conformément au
+choix validé. Pour une autre base, ajouter `--database CHEMIN`.
+Le stockage des compteurs est conservé. L’API et l’ingestion utilisent le même
+`GREENMIND_DATABASE_PATH`, par défaut `outputs/greenmind.sqlite`.

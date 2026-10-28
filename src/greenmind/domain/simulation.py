@@ -4,7 +4,7 @@ from math import isfinite
 
 
 def dry_one_tick(
-    soil_moisture_sim_pct: float,
+    soil_moisture_pct: float,
     air_temperature_c: float,
     air_humidity_pct: float,
     *,
@@ -20,7 +20,7 @@ def dry_one_tick(
     - aucun arrosage n'est traité à cette étape.
     """
     values = (
-        soil_moisture_sim_pct,
+        soil_moisture_pct,
         air_temperature_c,
         air_humidity_pct,
         base_evaporation_per_tick,
@@ -30,7 +30,7 @@ def dry_one_tick(
     if not all(isfinite(value) for value in values):
         raise ValueError("Les valeurs doivent être des nombres finis.")
 
-    if not 0.0 <= soil_moisture_sim_pct <= 100.0:
+    if not 0.0 <= soil_moisture_pct <= 100.0:
         raise ValueError("L'humidité du substrat doit être entre 0 et 100.")
 
     if not 0.0 <= air_humidity_pct <= 100.0:
@@ -49,4 +49,4 @@ def dry_one_tick(
     evaporation = (
         base_evaporation_per_tick * heat_factor * dryness_factor
     )
-    return max(0.0, min(100.0, soil_moisture_sim_pct - evaporation))
+    return max(0.0, min(100.0, soil_moisture_pct - evaporation))

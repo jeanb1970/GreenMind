@@ -38,7 +38,7 @@ flowchart LR
     API -->|Persistance des propositions et commandes| DB
 ```
 
-Les échanges MQTT utilisent le schéma **v2** et les topics `greenmind/v2/...`. L’API utilise le préfixe **`/api/v1`** : sa version est indépendante de celle du contrat MQTT.
+Les échanges MQTT utilisent le schéma **v3** et les topics `greenmind/v3/...`. L’API utilise le préfixe **`/api/v1`** : sa version est indépendante de celle du contrat MQTT.
 
 ## Installation
 
@@ -76,7 +76,7 @@ Pour piloter la journée au clavier :
 PYTHONPATH=src .venv/bin/python scripts/check_simulation_day.py --interactive
 ```
 
-Commandes disponibles : `etat`, `heure`, `lecture`, `humidite thym_01 18` et `quitter`. Pendant la lecture, `Ctrl+C` met en pause.
+Commandes disponibles : `etat`, `heure`, `lecture`, `humidite thym 18` et `quitter`. Pendant la lecture, `Ctrl+C` met en pause.
 
 ## Lancer la chaîne MQTT et l’API
 
@@ -132,23 +132,23 @@ La page `/docs` permet d’exécuter les requêtes et d’inspecter leurs schém
 |---|---|
 | `GET /plants` et `GET /plants/{plant_id}` | État, profil et alerte d’un bac |
 | `GET /plants/{plant_id}/measurements` | Mesures récentes |
-| `GET /events?plant_id=thym_01` | Journal filtré ; au plus 100 événements |
+| `GET /events?plant_id=thym` | Journal filtré ; au plus 100 événements |
 | `GET /simulation` | Session, horloge et révision courante |
-| `POST /simulation/controls` | `PAUSE`, `RESUME`, `ADVANCE`, `SET_SOIL_MOISTURE` |
+| `POST /simulation/controls` | `pause`, `reprendre`, `avancer_1_heure`, `modifier_humidite_sol` |
 | `GET /simulation/controls/{control_id}` | Résultat d’un contrôle |
 | `POST /plants/{plant_id}/watering-proposals` | Proposition déterministe sans effet sur la serre |
 | `POST /plants/{plant_id}/watering-commands` | Confirmation d’une proposition |
 | `GET /watering-commands/{command_id}` | Suivi de l’arrosage et attente éventuelle de sa mesure |
 
-Pour simuler une sécheresse : lire la révision dans `/simulation`, puis envoyer un contrôle `SET_SOIL_MOISTURE` sur `thym_01` avec `value: 18.0` et cette `expected_revision`. Attendre son résultat `APPLIED`, demander une proposition d’arrosage avec un corps `{}`, puis confirmer son `proposal_id`. L’injection nécessite une simulation en pause.
+Pour simuler une sécheresse : lire la révision dans `/simulation`, puis envoyer un contrôle `modifier_humidite_sol` sur `thym` avec `moist_request_pct: 18.0` et cette `expected_state`. Attendre son résultat `appliqué`, demander une proposition d’arrosage avec un corps `{}`, puis confirmer son `proposal_id`. L’injection nécessite une simulation en pause.
 
 ### Identifiants et confirmation d’effet
 
-- **`run_id`** distingue chaque démarrage du simulateur.
+- **`simulation`** distingue chaque démarrage, par exemple `Simu_001 du 28 Oct. 2026 à 14:30` ; son compteur est persistant.
 - **`control_id` / `command_id`** identifient une demande : conserver la même clé lors d’une nouvelle tentative. Une clé réutilisée avec un autre contenu est refusée.
-- **`event_id`** permet à SQLite de dédoublonner les mesures et événements reçus.
+- **`event_id`** (`Evenement_000001`) permet à SQLite de dédoublonner les mesures et événements reçus. Les autres clés suivent les formats `Controle_000001`, `Arrosage_000001`, `Proposition_000001` et `Alerte_000001`.
 
-Une réponse HTTP **202** ou un **PUBACK MQTT** confirme la prise en charge ou le transport, pas l’effet de l’arrosage. Son état devient `EXECUTED` uniquement après l’acquittement métier. Sans acquittement dans les dix secondes, le suivi indique `TIMED_OUT` : l’exécution reste incertaine, les nouvelles mutations sont bloquées et aucun renvoi automatique n’est effectué. Un acquittement tardif peut résoudre cette incertitude.
+Une réponse HTTP **202** ou un **PUBACK MQTT** confirme la prise en charge ou le transport, pas l’effet de l’arrosage. Son état devient `exécuté` uniquement après l’acquittement métier. Sans acquittement dans les dix secondes, le suivi indique `TIMED_OUT` : l’exécution reste incertaine, les nouvelles mutations sont bloquées et aucun renvoi automatique n’est effectué. Un acquittement tardif peut résoudre cette incertitude.
 
 Une proposition expire après 60 secondes réelles. Après un arrosage, le bac doit respecter son repos de 60 secondes réelles. Ces délais sont indépendants de l’heure virtuelle.
 
@@ -170,7 +170,7 @@ PYTHONPATH=src .venv/bin/python scripts/check_watering.py
 
 Chaque recette démarre ses propres services avec une base temporaire et les arrête ensuite. Une seule instance du simulateur peut détenir le verrou du projet. La recette d’arrosage couvre les trois bacs, les doublons, le repos, le timeout et un acquittement tardif.
 
-Les bases, journaux et index générés se trouvent dans `outputs/`, ignoré par Git. Une ancienne base de schéma v1 est refusée : son remplacement demande une sauvegarde et une migration ou reconstruction explicite.
+Les bases, journaux et index générés se trouvent dans `outputs/`, ignoré par Git. Une base utilisant les anciens champs doit être reconstruite avant le démarrage, selon la procédure ci-dessous.
 
 ## Organisation du dépôt
 
@@ -212,3 +212,29 @@ les processus Python enregistrés par ce lanceur ; Mosquitto reste disponible.
 `reset` arrête ces processus puis les relance avec une nouvelle session, en
 conservant l’historique SQLite. Les journaux se trouvent dans `outputs/demo/`.
 Arrêter les services lancés manuellement avant d’utiliser le lanceur.
+
+
+## Formats et reconstruction de la base
+
+Les contrats MQTT utilisent `schema_version: 3` et le préfixe `greenmind/v3`.
+Les dates sont en heure belge (`Europe/Brussels`) : `2026-07-10 12:15:10` pour
+l’heure météo/virtuelle, `2026-07-10 12:15:10.12345` pour les instants précis.
+
+Les compteurs sont conservés séparément dans `outputs/identifiers.sqlite`.
+Tous les processus doivent utiliser le même `GREENMIND_IDENTIFIERS_PATH` si
+ce chemin est personnalisé. Ils ne sont réinitialisés ni par un reset de session,
+ni par la reconstruction de la base de serre. Un client peut réserver une clé via
+`POST /api/v1/identifiers/control`, `/proposal` ou `/command`, avec un corps `{}`,
+puis conserver cette clé pour ses tentatives de la même demande. Sinon, l’API
+alloue une clé lorsqu’elle crée une nouvelle demande sans identifiant fourni.
+
+Après arrêt des services, reconstruire explicitement la base si elle utilise
+l’ancien schéma (cette commande efface son historique, sans sauvegarde) :
+
+```bash
+.venv/bin/python scripts/demo.py stop
+PYTHONPATH=src .venv/bin/python scripts/reset_database.py
+```
+
+Pour une base distincte, passer `--database /chemin/vers/base.sqlite`.
+Le dictionnaire complet est dans [les noms et formats validés](docs/Nommage_champs_valide.md).

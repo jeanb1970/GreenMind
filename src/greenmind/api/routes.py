@@ -1,9 +1,10 @@
 """Routes REST FastAPI (/api/v1) de la serre GreenMind."""
+from greenmind.time_formats import parse_local
+from greenmind.identifiers import next_id, ControlId
 
 from datetime import datetime, timedelta, timezone
 import json
 import socket
-from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from greenmind.api.dependencies import get_config, get_db, get_publisher, MqttPublisher
 from greenmind.api.schemas import (
@@ -22,7 +23,7 @@ from greenmind.db.readings import (
     active_alert,
     get_control_event,
     latest_reading,
-    latest_run_id,
+    latest_simulation,
     list_events,
     recent_readings,
     reserve_control,
@@ -57,15 +58,15 @@ def health_check(
     except Exception:
         mqtt_ok = False
 
-    run_id = latest_run_id(db) if db_ok else None
-    overall_status = "ok" if (db_ok and mqtt_ok) else "degraded"
+    simulation = latest_simulation(db) if db_ok else None
+    overall_status = "ok" if (db_ok and mqtt_ok) else "dégradé"
 
     return HealthResponse(
         status=overall_status,
-        run_id=run_id,
+        simulation=simulation,
         database_connected=db_ok,
         mqtt_connected=mqtt_ok,
-        demo_mode=True,
+        simulation_mode=True,
     )
 
 
@@ -75,38 +76,38 @@ def get_plants(
     config: GreenhouseConfig = Depends(get_config),
 ):
     """Retourne la synthèse des trois bacs et leur dernière mesure."""
-    run_id = latest_run_id(db)
+    simulation = latest_simulation(db)
     results = []
 
     for plant_cfg in config.plants:
-        reading = latest_reading(db, run_id, plant_cfg.plant_id) if run_id else None
-        alert = active_alert(db, run_id, plant_cfg.plant_id) if run_id else None
+        reading = latest_reading(db, simulation, plant_cfg.plant_id) if simulation else None
+        alert = active_alert(db, simulation, plant_cfg.plant_id) if simulation else None
 
         alert_dto = None
         if alert is not None:
             alert_dto = AlertResponse(
                 alert_id=alert.alert_id,
-                run_id=alert.run_id,
+                simulation=alert.simulation,
                 plant_id=alert.plant_id,
                 status=alert.status,
                 opened_at=alert.opened_at,
                 closed_at=alert.closed_at,
-                trigger_moisture_pct=alert.trigger_moisture_pct,
-                resolved_moisture_pct=alert.resolved_moisture_pct,
+                moist_trigger_pct=alert.moist_trigger_pct,
+                moist_resolved_pct=alert.moist_resolved_pct,
             )
 
         results.append(PlantSummary(
             plant_id=plant_cfg.plant_id,
             bed_id=plant_cfg.bed_id,
-            actuator_id=plant_cfg.actuator_id,
+            arroseur_id=plant_cfg.arroseur_id,
             display_name=plant_cfg.display_name,
-            soil_moisture_sim_pct=reading.soil_moisture_sim_pct if reading else None,
+            soil_moisture_pct=reading.soil_moisture_pct if reading else None,
             air_temperature_c=reading.air_temperature_c if reading else None,
             air_humidity_pct=reading.air_humidity_pct if reading else None,
             observed_at=reading.observed_at if reading else None,
             simulated_at=reading.simulated_at if reading else None,
-            simulated_tick=reading.simulated_tick if reading else None,
-            state_revision=reading.state_revision if reading else None,
+            heure_virtuelle=reading.heure_virtuelle if reading else None,
+            current_state=reading.current_state if reading else None,
             paused=reading.paused if reading else None,
             has_active_alert=alert is not None,
             active_alert=alert_dto,
@@ -130,48 +131,48 @@ def get_plant_detail(
             detail=f"Le bac '{plant_id}' est inconnu dans la serre.",
         )
 
-    run_id = latest_run_id(db)
-    reading = latest_reading(db, run_id, plant_id) if run_id else None
-    alert = active_alert(db, run_id, plant_id) if run_id else None
+    simulation = latest_simulation(db)
+    reading = latest_reading(db, simulation, plant_id) if simulation else None
+    alert = active_alert(db, simulation, plant_id) if simulation else None
 
     alert_dto = None
     if alert is not None:
         alert_dto = AlertResponse(
             alert_id=alert.alert_id,
-            run_id=alert.run_id,
+            simulation=alert.simulation,
             plant_id=alert.plant_id,
             status=alert.status,
             opened_at=alert.opened_at,
             closed_at=alert.closed_at,
-            trigger_moisture_pct=alert.trigger_moisture_pct,
-            resolved_moisture_pct=alert.resolved_moisture_pct,
+            moist_trigger_pct=alert.moist_trigger_pct,
+            moist_resolved_pct=alert.moist_resolved_pct,
         )
 
     return PlantDetail(
         plant_id=plant_cfg.plant_id,
         bed_id=plant_cfg.bed_id,
-        actuator_id=plant_cfg.actuator_id,
+        arroseur_id=plant_cfg.arroseur_id,
         display_name=plant_cfg.display_name,
-        soil_moisture_sim_pct=reading.soil_moisture_sim_pct if reading else None,
+        soil_moisture_pct=reading.soil_moisture_pct if reading else None,
         air_temperature_c=reading.air_temperature_c if reading else None,
         air_humidity_pct=reading.air_humidity_pct if reading else None,
         observed_at=reading.observed_at if reading else None,
         simulated_at=reading.simulated_at if reading else None,
-        simulated_tick=reading.simulated_tick if reading else None,
-        state_revision=reading.state_revision if reading else None,
+        heure_virtuelle=reading.heure_virtuelle if reading else None,
+        current_state=reading.current_state if reading else None,
         paused=reading.paused if reading else None,
         has_active_alert=alert is not None,
         active_alert=alert_dto,
-        low_threshold_sim_pct=plant_cfg.low_threshold_sim_pct,
-        rearm_threshold_sim_pct=plant_cfg.rearm_threshold_sim_pct,
-        high_threshold_sim_pct=plant_cfg.high_threshold_sim_pct,
-        target_soil_moisture_sim_pct=plant_cfg.target_soil_moisture_sim_pct,
-        base_evaporation_per_hour=plant_cfg.base_evaporation_per_hour,
+        moist_low_pct=plant_cfg.moist_low_pct,
+        moist_rearm_pct=plant_cfg.moist_rearm_pct,
+        moist_high_pct=plant_cfg.moist_high_pct,
+        moist_target_pct=plant_cfg.moist_target_pct,
+        evaporation_pct_per_hour=plant_cfg.evaporation_pct_per_hour,
         reference_temperature_c=plant_cfg.reference_temperature_c,
         temperature_factor_per_c=plant_cfg.temperature_factor_per_c,
-        irrigation_gain_per_sim_s=plant_cfg.irrigation_gain_per_sim_s,
-        max_watering_duration_sim_s=plant_cfg.max_watering_duration_sim_s,
-        watering_cooldown_real_s=plant_cfg.watering_cooldown_real_s,
+        watering_gain_pct_per_s=plant_cfg.watering_gain_pct_per_s,
+        watering_max_duration_s=plant_cfg.watering_max_duration_s,
+        watering_rest_s=plant_cfg.watering_rest_s,
     )
 
 
@@ -191,11 +192,11 @@ def get_plant_measurements(
             detail=f"Le bac '{plant_id}' est inconnu.",
         )
 
-    run_id = latest_run_id(db)
-    if not run_id:
+    simulation = latest_simulation(db)
+    if not simulation:
         return []
 
-    readings = recent_readings(db, run_id, plant_id, limit=limit)
+    readings = recent_readings(db, simulation, plant_id, limit=limit)
     return [
         MeasurementItem(
             event_id=r.event_id,
@@ -203,12 +204,12 @@ def get_plant_measurements(
             simulated_at=r.simulated_at,
             emitted_at=r.emitted_at,
             received_at=r.received_at,
-            simulated_tick=r.simulated_tick,
-            state_revision=r.state_revision,
-            soil_moisture_sim_pct=r.soil_moisture_sim_pct,
+            heure_virtuelle=r.heure_virtuelle,
+            current_state=r.current_state,
+            soil_moisture_pct=r.soil_moisture_pct,
             air_temperature_c=r.air_temperature_c,
             air_humidity_pct=r.air_humidity_pct,
-            pump_active=r.pump_active,
+            arroseur_active=r.arroseur_active,
             measurement_origin=r.measurement_origin,
         )
         for r in readings
@@ -232,21 +233,21 @@ def get_events(
                 detail=f"Le bac '{plant_id}' est inconnu.",
             )
 
-    run_id = latest_run_id(db)
-    if not run_id:
+    simulation = latest_simulation(db)
+    if not simulation:
         return []
 
-    rows = list_events(db, run_id, plant_id=plant_id, limit=limit)
+    rows = list_events(db, simulation, plant_id=plant_id, limit=limit)
     result = []
     for r in rows:
         try:
-            details = json.loads(r.details_json) if r.details_json else {}
+            details = json.loads(r.details) if r.details else {}
         except Exception:
             details = {}
         result.append(EventItem(
             sequence=r.sequence,
             event_id=r.event_id,
-            run_id=r.run_id,
+            simulation=r.simulation,
             plant_id=r.plant_id,
             created_at=r.created_at,
             simulated_at=r.simulated_at,
@@ -262,32 +263,32 @@ def get_simulation_state(
     db=Depends(get_db),
 ):
     """Retourne l'état courant de l'horloge et de la simulation."""
-    run_id = latest_run_id(db)
-    if not run_id:
+    simulation = latest_simulation(db)
+    if not simulation:
         return SimulationStateResponse()
 
     # Prendre la lecture la plus récente parmi les bacs
-    sample = latest_reading(db, run_id, "basilic_01")
+    sample = latest_reading(db, simulation, "basilic")
     if sample is None:
-        return SimulationStateResponse(run_id=run_id)
+        return SimulationStateResponse(simulation=simulation)
 
     # Vérification de présence (message émis dans les 10 dernières secondes)
     presence = False
     try:
-        emitted = datetime.fromisoformat(sample.emitted_at.replace("Z", "+00:00"))
+        emitted = parse_local(sample.emitted_at)
         if datetime.now(timezone.utc) - emitted < timedelta(seconds=10):
             presence = True
     except Exception:
         presence = False
 
     return SimulationStateResponse(
-        run_id=run_id,
-        simulated_tick=sample.simulated_tick,
-        state_revision=sample.state_revision,
+        simulation=simulation,
+        heure_virtuelle=sample.heure_virtuelle,
+        current_state=sample.current_state,
         simulated_at=sample.simulated_at,
         paused=sample.paused,
-        completed=sample.completed,
-        scenario="demo_greenhouse_day",
+        day_complete=sample.day_complete,
+        scenario="journee_serre",
         presence=presence,
     )
 
@@ -303,28 +304,28 @@ def post_simulation_control(
     publisher: MqttPublisher = Depends(get_publisher),
 ):
     """Émet asynchroniquement une commande de simulation vers MQTT."""
-    run_id_str = latest_run_id(db)
-    if not run_id_str:
+    simulation_str = latest_simulation(db)
+    if not simulation_str:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Aucune session de simulation active.",
         )
 
-    run_id = UUID(run_id_str)
+    simulation = simulation_str
 
-    control_id = payload.control_id or uuid4()
+    control_id = payload.control_id or next_id("control")
     now = datetime.now(timezone.utc)
 
     try:
         command = SimulationControl(
             control_id=control_id,
-            run_id=run_id,
-            expected_revision=payload.expected_revision,
+            simulation=simulation,
+            expected_state=payload.expected_state,
             action=payload.action,
             requested_at=now,
             expires_at=now + timedelta(seconds=30),
             plant_id=payload.plant_id,
-            value=payload.value,
+            moist_request_pct=payload.moist_request_pct,
         )
     except ValueError as error:
         raise HTTPException(
@@ -344,16 +345,16 @@ def post_simulation_control(
 
     return ControlAcceptedResponse(
         control_id=str(control_id),
-        status="PENDING",
+        status="en_attente",
         action=payload.action,
-        expected_revision=payload.expected_revision,
+        expected_state=payload.expected_state,
         message=f"Commande {payload.action} acceptée ; résultat disponible via son identifiant de suivi.",
     )
 
 
 @router.get("/simulation/controls/{control_id}", response_model=ControlStatusResponse)
 def get_control_status(
-    control_id: UUID,
+    control_id: ControlId,
     db=Depends(get_db),
 ):
     """Retourne l'état d'exécution corrélé d'un contrôle de simulation."""
@@ -361,7 +362,7 @@ def get_control_status(
     if row is None:
         return ControlStatusResponse(
             control_id=str(control_id),
-            status="PENDING",
+            status="en_attente",
             reason="La commande est en cours de traitement ou en attente d'acquittement.",
         )
 
@@ -369,9 +370,9 @@ def get_control_status(
         data = json.loads(row.payload)
         return ControlStatusResponse(
             control_id=str(control_id),
-            status=data.get("status", "APPLIED"),
-            state_revision=data.get("state_revision"),
-            simulated_tick=data.get("simulated_tick"),
+            status=data.get("status", "appliqué"),
+            current_state=data.get("current_state"),
+            heure_virtuelle=data.get("heure_virtuelle"),
             simulated_at=data.get("simulated_at"),
             reason=data.get("reason"),
         )
@@ -380,3 +381,11 @@ def get_control_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Impossible de lire le résultat du contrôle : {error}.",
         ) from error
+
+
+@router.post('/identifiers/{category}')
+def allocate_identifier(category: str):
+    """Alloue une clé que le client conserve pour ses nouvelles tentatives."""
+    if category not in ('control', 'proposal', 'command'):
+        raise HTTPException(status_code=404, detail="Catégorie d'identifiant inconnue.")
+    return {'identifier': next_id(category)}

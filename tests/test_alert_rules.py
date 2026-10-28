@@ -22,8 +22,8 @@ def test_alert_thresholds(moisture, initially_open, expected_open):
     result = next_dry_alert_state(
         moisture,
         alert_open=initially_open,
-        low_threshold_sim_pct=35.0,
-        rearm_threshold_sim_pct=40.0,
+        moist_low_pct=35.0,
+        moist_rearm_pct=40.0,
     )
 
     assert result is expected_open, (
@@ -47,8 +47,8 @@ def test_alert_remains_open_until_rearm_then_can_open_again():
         alert_open = next_dry_alert_state(
             moisture,
             alert_open=alert_open,
-            low_threshold_sim_pct=35.0,
-            rearm_threshold_sim_pct=40.0,
+            moist_low_pct=35.0,
+            moist_rearm_pct=40.0,
         )
         actual_states.append(alert_open)
 

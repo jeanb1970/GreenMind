@@ -2,11 +2,11 @@
 
 
 def next_dry_alert_state(
-    soil_moisture_sim_pct: float,
+    soil_moisture_pct: float,
     *,
     alert_open: bool,
-    low_threshold_sim_pct: float,
-    rearm_threshold_sim_pct: float,
+    moist_low_pct: float,
+    moist_rearm_pct: float,
 ) -> bool:
     """Retourne True si l'alerte doit être ouverte après cette mesure.
 
@@ -17,6 +17,6 @@ def next_dry_alert_state(
     Cette fonction ne réalise aucune écriture en base.
     """
     if alert_open:
-        return soil_moisture_sim_pct <= rearm_threshold_sim_pct
+        return soil_moisture_pct <= moist_rearm_pct
 
-    return soil_moisture_sim_pct < low_threshold_sim_pct
+    return soil_moisture_pct < moist_low_pct

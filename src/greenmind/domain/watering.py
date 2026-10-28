@@ -7,23 +7,23 @@ from greenmind.greenhouse_config import BedProfile
 
 @dataclass(frozen=True)
 class WateringPlan:
-    duration_sim_s: float
-    soil_moisture_after_pct: float
-    capped: bool
+    watering_duration_s: float
+    moist_after_pct: float
+    duration_limited: bool
     reason: str
 
 
 def plan_watering(profile: BedProfile, moisture: float) -> WateringPlan:
     if not isfinite(moisture) or not 0 <= moisture <= 100:
         raise ValueError("L'humidité doit être finie et comprise entre 0 et 100.")
-    if moisture >= profile.low_threshold_sim_pct:
+    if moisture >= profile.moist_low_pct:
         raise ValueError("Le bac n'est pas sous son seuil bas ; aucun arrosage proposé.")
-    requested = (profile.target_soil_moisture_sim_pct - moisture) / profile.irrigation_gain_per_sim_s
-    duration = min(profile.max_watering_duration_sim_s, requested)
-    capped = requested > profile.max_watering_duration_sim_s
-    after = min(100.0, moisture + duration * profile.irrigation_gain_per_sim_s)
+    requested = (profile.moist_target_pct - moisture) / profile.watering_gain_pct_per_s
+    duration = min(profile.watering_max_duration_s, requested)
+    duration_limited = requested > profile.watering_max_duration_s
+    after = min(100.0, moisture + duration * profile.watering_gain_pct_per_s)
     reason = (f"{profile.display_name} : humidité {moisture:g} % sous le seuil "
-              f"{profile.low_threshold_sim_pct:g} % ; arrosage de {duration:g} secondes virtuelles.")
-    if capped:
-        reason += f" Durée plafonnée ; la cible {profile.target_soil_moisture_sim_pct:g} % ne sera pas atteinte."
-    return WateringPlan(duration, after, capped, reason)
+              f"{profile.moist_low_pct:g} % ; arrosage de {duration:g} secondes virtuelles.")
+    if duration_limited:
+        reason += f" Durée plafonnée ; la cible {profile.moist_target_pct:g} % ne sera pas atteinte."
+    return WateringPlan(duration, after, duration_limited, reason)

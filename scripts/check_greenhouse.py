@@ -17,11 +17,11 @@ def main() -> None:
     for plant in config.plants:
         dry = next_dry_alert_state(
             32.0, alert_open=False,
-            low_threshold_sim_pct=plant.low_threshold_sim_pct,
-            rearm_threshold_sim_pct=plant.rearm_threshold_sim_pct,
+            moist_low_pct=plant.moist_low_pct,
+            moist_rearm_pct=plant.moist_rearm_pct,
         )
         print(
-            f"{plant.display_name} | {plant.bed_id} | {plant.actuator_id} | "
+            f"{plant.display_name} | {plant.bed_id} | {plant.arroseur_id} | "
             f"{initial[plant.plant_id]:g} → {after[plant.plant_id]:g} % | "
             f"à 32 % : {'alerte' if dry else 'pas de nouvelle alerte'}"
         )

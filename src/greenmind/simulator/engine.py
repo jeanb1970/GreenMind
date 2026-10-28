@@ -3,13 +3,13 @@
 L'appelant sérialise les appels et transporte les transitions vers MQTT en B3.
 Ce module ne dort pas, ne publie pas et ne modifie aucune base.
 """
+from greenmind.identifiers import next_simulation, SimulationId
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import isfinite
 from time import monotonic
-from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from greenmind.domain.greenhouse import dry_greenhouse_one_hour, initial_soil_state
@@ -25,12 +25,12 @@ REAL_SECONDS_PER_HOUR = 5.0
 class SimulationSnapshot:
     """Copie immuable d'un état ; la météo est celle du dernier pas appliqué."""
 
-    run_id: UUID
+    simulation: SimulationId
     simulated_at: datetime
-    simulated_tick: int
-    state_revision: int
+    heure_virtuelle: int
+    current_state: int
     paused: bool
-    completed: bool
+    day_complete: bool
     weather: WeatherReading
     soil_values: tuple[tuple[str, float], ...]
 
@@ -91,7 +91,7 @@ class SimulationEngine:
         self._clock = clock
         self._last_clock: float | None = None
         self._deadline: float | None = None
-        self._run_id = uuid4()
+        self._simulation = next_simulation()
         self._soil = initial_soil_state(config)
         self._tick = 0
         self._revision = 0
@@ -99,12 +99,12 @@ class SimulationEngine:
 
     def snapshot(self) -> SimulationSnapshot:
         return SimulationSnapshot(
-            run_id=self._run_id,
+            simulation=self._simulation,
             simulated_at=self._weather[0].observed_at + timedelta(hours=self._tick),
-            simulated_tick=self._tick,
-            state_revision=self._revision,
+            heure_virtuelle=self._tick,
+            current_state=self._revision,
             paused=self._paused,
-            completed=self._tick == len(self._weather),
+            day_complete=self._tick == len(self._weather),
             weather=self._weather[max(0, self._tick - 1)],
             soil_values=tuple(self._soil.items()),
         )
@@ -187,16 +187,16 @@ class SimulationEngine:
         before = self.snapshot()
         self._soil = {**self._soil, plant_id: float(value)}
         self._revision += 1
-        return SimulationTransition("manual_override", before, self.snapshot(), plant_id)
+        return SimulationTransition("modification_manuelle", before, self.snapshot(), plant_id)
 
-    def water(self, plant_id: str, duration_sim_s: float) -> SimulationTransition:
+    def water(self, plant_id: str, watering_duration_s: float) -> SimulationTransition:
         """Applique instantanément un gain virtuel, sans avancer l'heure météo."""
         from greenmind.domain.watering import plan_watering
         profile = self._config.get_plant(plant_id)
         plan = plan_watering(profile, self._soil[plant_id])
-        if not isfinite(duration_sim_s) or abs(duration_sim_s - plan.duration_sim_s) > 1e-9:
+        if not isfinite(watering_duration_s) or abs(watering_duration_s - plan.watering_duration_s) > 1e-9:
             raise ValueError("La durée ne correspond plus à la proposition déterministe.")
         before = self.snapshot()
-        self._soil = {**self._soil, plant_id: plan.soil_moisture_after_pct}
+        self._soil = {**self._soil, plant_id: plan.moist_after_pct}
         self._revision += 1
-        return SimulationTransition("watering", before, self.snapshot(), plant_id)
+        return SimulationTransition("arrosage", before, self.snapshot(), plant_id)

@@ -39,10 +39,10 @@ class MqttPublisher:
         self.port = port or int(os.environ.get("GREENMIND_MQTT_PORT", "1883"))
 
     def publish_control(self, payload_json: str) -> None:
-        self._publish("greenmind/v2/simulation/controls", payload_json)
+        self._publish("greenmind/v3/simulation/controls", payload_json)
 
     def publish_watering(self, plant_id: str, payload_json: str) -> None:
-        self._publish(f"greenmind/v2/plants/{plant_id}/commands", payload_json)
+        self._publish(f"greenmind/v3/plants/{plant_id}/commands", payload_json)
 
     def _publish(self, topic: str, payload_json: str) -> None:
         client = mqtt.Client(

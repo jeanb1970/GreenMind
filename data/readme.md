@@ -3,19 +3,19 @@
 ## Journée variable — trois bacs
 
 `fixtures/weather_greenhouse_day.csv` est la fixture du scénario
-`demo_greenhouse_day`, avec les profils de `config/greenhouse.yaml`.
+`journee_serre`, avec les profils de `config/greenhouse.yaml`.
 Cette fixture remplace l’ancien scénario constant `demo_dry_basil` de la v1.3.
 Le simulateur, les tests et les recettes MQTT utilisent tous cette journée commune.
 L’humidité du sol est calculée séparément pour chaque bac à partir des profils
 de `config/greenhouse.yaml`, sur une échelle pédagogique de 0 à 100.
 
 - Journée fictive du 10 juillet 2026, de 00:00 à 24:00 en Europe/Brussels.
-- 24 lignes, une par intervalle `[h, h+1h[`, dates explicites `+02:00`.
+- 24 lignes, une par intervalle `[h, h+1h[`, dates belges au format `AAAA-MM-JJ HH:MM:SS`.
 - Température : 18 °C vers 04–05 h, maximum de 32 °C à 14 h,
   puis 20,5 °C à 23 h.
 - Humidité de l'air : 82 % vers 04–05 h, minimum de 40 % à 14 h,
   puis 74 % à 23 h.
-- Provenance : `synthetic_weather_plus_synthetic_soil` ; chiffres créés
+- Provenance : `meteo_simulee` ; chiffres créés
   pour le scénario pédagogique, sans source externe ni calibration réelle.
 
 La météo représente une ambiance de serre synthétique commune aux trois bacs.
@@ -45,10 +45,10 @@ valeur imposée. Les snapshots ne permettent pas de modifier le moteur de l'ext�
 Pause/reprise incrémentent aussi la révision lors d'un changement effectif.
 
 Le moteur local réalise uniquement les transitions d’état. Le service
-`simulator/mqtt_service.py` sérialise ses appels et publie les trois bacs en MQTT v2 ;
+`simulator/mqtt_service.py` sérialise ses appels et publie les trois bacs en MQTT v3 ;
 `simulator/controls.py` vérifie les sessions, révisions, expirations et doublons.
-Un heartbeat est publié toutes les cinq secondes, y compris pendant la pause.
-Les arrosages virtuels sont traités par `simulator/watering.py` : confirmation
+Un signal_presence est publié toutes les cinq secondes, y compris pendant la pause.
+Les arrosages virtuels sont traités par `simulator/arrosage.py` : confirmation
 via l’API, gain instantané sur le bac ciblé et acquittement corrélé, sans avancer
 l’heure météo. Le repos reste mesuré en secondes réelles.
 
@@ -69,6 +69,17 @@ Pour piloter localement au clavier :
 PYTHONPATH=src .venv/bin/python3 scripts/check_simulation_day.py --interactive
 ```
 
-Commandes : `heure`, `etat`, `humidite thym_01 18`, `lecture`, `quitter`.
+Commandes : `heure`, `etat`, `humidite thym 18`, `lecture`, `quitter`.
 Pendant `lecture`, Ctrl+C met en pause ; le prompt revient. Hors lecture,
 Ctrl+C termine le contrôle. Aucune donnée n'est envoyée à MQTT ou SQLite.
+
+
+### Format des dates et provenance
+
+Le CSV utilise l’heure belge `Europe/Brussels` au format `2026-07-10 12:15:10`,
+sans suffixe de fuseau dans le texte. Le lecteur convertit les dates en instants
+UTC pour les calculs internes. La provenance est `meteo_simulee` ;
+`meteo_historique` désigne une météo historique avec sol toujours simulé.
+Les instants précis des échanges et de la base ont cinq décimales après les
+secondes : `2026-07-10 12:15:10.12345`. Une heure locale ambiguë ou inexistante
+au changement d’heure est refusée plutôt que convertie arbitrairement.

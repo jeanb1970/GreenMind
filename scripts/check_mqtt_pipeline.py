@@ -3,6 +3,8 @@
 Le broker doit déjà fonctionner. Les contrôles visent seulement la session
 créée par ce script ; aucun arrêt du broker ni effacement de la base projet.
 """
+from greenmind.time_formats import local_text
+from greenmind.identifiers import next_id
 import json
 import os
 from pathlib import Path
@@ -12,14 +14,14 @@ import tempfile
 from threading import Event
 from time import monotonic, sleep
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import uuid4
 import paho.mqtt.client as mqtt
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from greenmind.db.models import GreenhouseReading, SimulationEventRow
 from greenmind.db.session import create_database_engine
 from greenmind.db.readings import latest_reading
-from greenmind.schemas import SimulationControl, TelemetryV2
+from greenmind.schemas import SimulationControl, TelemetryV3
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,10 +62,10 @@ def main():
                         GreenhouseReading.measurement_origin == 'initial')))
                     return rows if len(rows) == 3 else None
             rows = wait_for(initial_rows, 'trois mesures initiales en SQL')
-            run_id = UUID(rows[0].run_id)
-            if {r.plant_id for r in rows} != {'basilic_01','thym_01','romarin_01'}:
+            simulation = rows[0].simulation
+            if {r.plant_id for r in rows} != {'basilic','thym','romarin'}:
                 raise RuntimeError('Les trois bacs attendus ne sont pas présents.')
-            if any(r.run_id != str(run_id) or r.simulated_tick != 0 or not r.paused for r in rows):
+            if any(r.simulation != str(simulation) or r.heure_virtuelle != 0 or not r.paused for r in rows):
                 raise RuntimeError('État initial incohérent.')
             print('OK : trois mesures initiales, même session, pause au pas 0.', flush=True)
             connected = Event()
@@ -80,15 +82,15 @@ def main():
                 info.wait_for_publish(timeout=5)
                 if not info.is_published(): raise RuntimeError('Publication de contrôle non confirmée.')
             def require_reading(plant_id: str) -> GreenhouseReading:
-                reading = latest_reading(db, run_id, plant_id)
+                reading = latest_reading(db, simulation, plant_id)
                 if reading is None:
                     raise RuntimeError(f"Mesure introuvable en base pour {plant_id}.")
                 return reading
 
             def request(action, **kwargs):
                 now = datetime.now(timezone.utc)
-                return SimulationControl(control_id=uuid4(), run_id=run_id, action=action,
-                    expected_revision=require_reading('basilic_01').state_revision,
+                return SimulationControl(control_id=next_id("control"), simulation=simulation, action=action,
+                    expected_state=require_reading('basilic').current_state,
                     requested_at=now, expires_at=now+timedelta(seconds=30), **kwargs)
             def result_of(command):
                 with Session(db) as session:
@@ -96,38 +98,38 @@ def main():
                         SimulationEventRow.control_id == str(command.control_id)))
                     return json.loads(row.payload) if row else None
             def send(command):
-                publish('greenmind/v2/simulation/controls',command.model_dump_json())
+                publish('greenmind/v3/simulation/controls',command.model_dump_json())
                 return wait_for(lambda: result_of(command), 'résultat métier persisté')
-            advance = request('ADVANCE')
-            if send(advance)['status'] != 'APPLIED': raise RuntimeError('Avance refusée.')
+            advance = request('avancer_1_heure')
+            if send(advance)['status'] != 'appliqué': raise RuntimeError('Avance refusée.')
             send(advance)
-            wait_for(lambda: all((r := latest_reading(db, run_id, p)) is not None and r.simulated_tick == 1
-                                for p in ('basilic_01', 'thym_01', 'romarin_01')), 'pas 1 des trois bacs')
+            wait_for(lambda: all((r := latest_reading(db, simulation, p)) is not None and r.heure_virtuelle == 1
+                                for p in ('basilic', 'thym', 'romarin')), 'pas 1 des trois bacs')
             sleep(0.3)
-            if require_reading('basilic_01').simulated_tick != 1:
+            if require_reading('basilic').heure_virtuelle != 1:
                 raise RuntimeError('Doublon de contrôle appliqué deux fois.')
             with Session(db) as session:
                 n = session.scalar(select(func.count()).select_from(SimulationEventRow).where(
                     SimulationEventRow.control_id == str(advance.control_id)))
                 if n != 1: raise RuntimeError('Acquittement non dédoublonné.')
             print('OK : avance MQTT + acquittement SQL ; doublon sans deuxième effet.', flush=True)
-            before = {p: require_reading(p).soil_moisture_sim_pct for p in ('basilic_01', 'thym_01', 'romarin_01')}
-            injection = request('SET_SOIL_MOISTURE',plant_id='thym_01',value=18.0)
-            if send(injection)['status'] != 'APPLIED': raise RuntimeError('Injection refusée.')
+            before = {p: require_reading(p).soil_moisture_pct for p in ('basilic', 'thym', 'romarin')}
+            injection = request('modifier_humidite_sol',plant_id='thym',moist_request_pct=18.0)
+            if send(injection)['status'] != 'appliqué': raise RuntimeError('Injection refusée.')
             for plant in before:
-                expected = 18.0 if plant == 'thym_01' else before[plant]
-                if require_reading(plant).soil_moisture_sim_pct != expected:
+                expected = 18.0 if plant == 'thym' else before[plant]
+                if require_reading(plant).soil_moisture_pct != expected:
                     raise RuntimeError('Injection non isolée.')
-            stale = request('ADVANCE').model_copy(update={'expected_revision':0})
-            if send(stale)['status'] != 'REJECTED': raise RuntimeError('Révision périmée acceptée.')
+            stale = request('avancer_1_heure').model_copy(update={'expected_state':0})
+            if send(stale)['status'] != 'refusé': raise RuntimeError('Révision périmée acceptée.')
             print('OK : injection isolée au thym ; ancienne révision refusée.', flush=True)
-            sample = require_reading('basilic_01')
-            data = {name:getattr(sample,name) for name in TelemetryV2.model_fields}
-            data['event_id'] = str(uuid4())
-            data['emitted_at'] = datetime.now(timezone.utc).isoformat()
-            bad_id = str(uuid4())
-            topic = 'greenmind/v2/plants/basilic_01/telemetry'
-            publish(topic,json.dumps(data | {'event_id':bad_id,'soil_moisture_sim_pct':101}))
+            sample = require_reading('basilic')
+            data = {name:getattr(sample,name) for name in TelemetryV3.model_fields}
+            data['event_id'] = next_id("event")
+            data['emitted_at'] = local_text(datetime.now(timezone.utc))
+            bad_id = next_id("event")
+            topic = 'greenmind/v3/plants/basilic/telemetry'
+            publish(topic,json.dumps(data | {'event_id':bad_id,'soil_moisture_pct':101}))
             for _ in range(2): publish(topic,json.dumps(data))
             def valid_present():
                 with Session(db) as session: return session.get(GreenhouseReading,data['event_id']) is not None
@@ -135,15 +137,15 @@ def main():
             with Session(db) as session:
                 if session.get(GreenhouseReading,bad_id): raise RuntimeError('Mesure invalide enregistrée.')
             print('OK : mesure invalide rejetée, message suivant enregistré et dédoublonné.', flush=True)
-            wait_for(lambda: (r := latest_reading(db, run_id, 'thym_01')) is not None and r.measurement_origin == 'heartbeat',
+            wait_for(lambda: (r := latest_reading(db, simulation, 'thym')) is not None and r.measurement_origin == 'signal_presence',
                      'présence en pause', 10)
-            if require_reading('thym_01').soil_moisture_sim_pct != 18:
+            if require_reading('thym').soil_moisture_pct != 18:
                 raise RuntimeError('Dessèchement pendant la pause.')
-            resume = request('RESUME')
-            if send(resume)['status'] != 'APPLIED': raise RuntimeError('Reprise refusée.')
-            wait_for(lambda: (r := latest_reading(db, run_id, 'thym_01')) is not None and r.simulated_tick == 2,
+            resume = request('reprendre')
+            if send(resume)['status'] != 'appliqué': raise RuntimeError('Reprise refusée.')
+            wait_for(lambda: (r := latest_reading(db, simulation, 'thym')) is not None and r.heure_virtuelle == 2,
                      'évolution automatique', 10)
-            if send(request('PAUSE'))['status'] != 'APPLIED': raise RuntimeError('Pause refusée.')
+            if send(request('pause'))['status'] != 'appliqué': raise RuntimeError('Pause refusée.')
             print('OK : présence en pause, reprise automatique et nouvelle pause.', flush=True)
             if any(p.poll() is not None for p in processes): raise RuntimeError('Un service a quitté prématurément.')
             passed = True

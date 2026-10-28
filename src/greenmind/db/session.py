@@ -64,7 +64,7 @@ def create_database_engine(
             existing = {c["name"] for c in inspector.get_columns("sensor_readings")}
             expected = set(metadata.tables["sensor_readings"].columns.keys())
             if existing != expected:
-                raise RuntimeError("Schéma SQLite incompatible ; utiliser une base distincte ou une migration explicite.")
+                raise RuntimeError("Schéma SQLite incompatible ; arrêter les services puis lancer PYTHONPATH=src .venv/bin/python scripts/reset_database.py pour reconstruire la base (historique effacé).")
         metadata.create_all(engine)
 
     except SQLAlchemyError as error:

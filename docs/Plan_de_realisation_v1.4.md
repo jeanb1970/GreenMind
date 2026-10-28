@@ -54,7 +54,7 @@ Même réduit, ce calendrier reste tendu, particulièrement le 2 novembre. Prép
 | B0 — Cadrage | Six ajouts classés, cible cohérente, parcours de démo écrit | CDC v1.4 et présent plan | Exigences, choix proposés et inconnues distingués |
 | B1 — Trois profils | Une configuration de serre validée et trois états indépendants | `config/greenhouse.yaml`, `greenhouse_config.py`, `domain/greenhouse.py`, `tests/test_greenhouse.py` | Même météo, trois profils ; une modification ne touche pas les autres ; ancienne suite compatible avec la transition |
 | B2 — Journée et horloge | CSV journalier variable et moteur pilotable sans réseau | fixture, `data/README.md`, `simulator/weather.py`, nouveau moteur d'état/horloge | 24 pas, pause, avance, lecture accélérée et injections déterministes ; scénario 32 % vérifié |
-| B3 — Contrats et pipeline | Trois bacs transitent réellement par MQTT jusqu'à SQLite | `docs/contracts.md`, `schemas.py`, `simulator/main.py`, ingestion, modèles SQL, scripts de contrôle | Schéma v2, identités/session/révisions, sauvegarde/reconstruction base documentée, dédoublonnage avec vrai broker |
+| B3 — Contrats et pipeline | Trois bacs transitent réellement par MQTT jusqu'à SQLite | `docs/contracts.md`, `schemas.py`, `simulator/main.py`, ingestion, modèles SQL, scripts de contrôle | Schéma v3, identités/session/révisions, sauvegarde/reconstruction base documentée, dédoublonnage avec vrai broker |
 | B4 — Alertes, journal et API | État des trois bacs et historique consultables via REST | `domain/alerts.py`, persistance alertes/journal, `api/`, tests d'intégration | Injection puis ouverture/clôture d'alerte atomique, journal borné et filtré par bac, erreurs et rollback vérifiés |
 | B5 — Trois arroseurs | Boucle de commande complète sans IA | règles, propositions, MQTT API, commandes simulateur, acquittements SQL | Pour chaque bac : proposition → confirmation → effet unique → ack ; refus et timeout |
 | B6 — Deux pages | Tableau de bord et console contrôlent la même application | `dashboard/`, `dashboard/pages/`, routes de contrôle, scripts start/stop/reset | Pause/avance/injection depuis le front, effet via MQTT visible dans le journal ; deux cycles de reset |
@@ -62,9 +62,9 @@ Même réduit, ce calendrier reste tendu, particulièrement le 2 novembre. Prép
 | B8 — Assistant intégré | Explications contextualisées pour chaque bac | `rag/assistant.py`, API assistant, front, tests/questions de recette | Mesures exactes, sources pertinentes, aucune action depuis le LLM, timeout sans blocage IoT |
 | B9 — Gel et soutenance | Parcours complet répétable et documenté | README, guide démo, résultats de recette, supports | A14-01 à A14-13, hors ligne, deux répétitions chronométrées, sauvegarde/capture de secours |
 
-B1/B2 disposent de tests et contrôles locaux. La migration B3 est terminée : `config/greenhouse.yaml` est l’unique configuration, tous les producteurs et consommateurs utilisent le schéma MQTT v2. L’ancien fichier `config/plants.yaml` et son chargeur v1 ont été retirés.
+B1/B2 disposent de tests et contrôles locaux. La migration B3 est terminée : `config/greenhouse.yaml` est l’unique configuration, tous les producteurs et consommateurs utilisent le schéma MQTT v3. L’ancien fichier `config/plants.yaml` et son chargeur v1 ont été retirés.
 
-Le contrat des contrôles est défini en B3 ; son application par le simulateur et son suivi API sont terminés en B6. B4 utilise un producteur de test pour vérifier les mesures marquées `manual_override`, sans écrire directement dans les tables. B5 peut être démontrée via l'API avant la construction des fronts.
+Le contrat des contrôles est défini en B3 ; son application par le simulateur et son suivi API sont terminés en B6. B4 utilise un producteur de test pour vérifier les mesures marquées `modification_manuelle`, sans écrire directement dans les tables. B5 peut être démontrée via l'API avant la construction des fronts.
 
 ## 2. Première brique de code : B1 — réalisée
 
@@ -148,10 +148,10 @@ Fichiers : `docs/contracts.md`, `src/greenmind/schemas.py`, `src/greenmind/db/mo
 `tests/test_pipeline.py`, `scripts/check_mqtt_pipeline.py`, `scripts/check_database.py`.
 
 Résultats :
-- Contrats techniques v1.4 formalisés dans `docs/contracts.md` (schéma v2, `greenmind/v2/`).
-- Validation stricte Pydantic (`TelemetryV2`, `SimulationControl`, `SimulationEvent`).
-- Bascule des trois bacs (`basilic_01`, `thym_01`, `romarin_01`) via Mosquitto QoS 1 vers SQLite (`sensor_readings`, `simulation_runs`, `simulation_events`).
-- Commandes de simulation (`PAUSE`, `RESUME`, `ADVANCE`, `SET_SOIL_MOISTURE`), dédoublonnage par `event_id` et `control_id`, protection contre les révisions périmées, battement de cœur (`heartbeat`) en pause et rejet strict des messages non conformes.
+- Contrats techniques v1.4 formalisés dans `docs/contracts.md` (schéma courant v3, `greenmind/v3/`).
+- Validation stricte Pydantic (`TelemetryV3`, `SimulationControl`, `SimulationEvent`).
+- Bascule des trois bacs (`basilic`, `thym`, `romarin`) via Mosquitto QoS 1 vers SQLite (`sensor_readings`, `simulation_runs`, `simulation_events`).
+- Commandes de simulation (`pause`, `reprendre`, `avancer_1_heure`, `modifier_humidite_sol`), dédoublonnage par `event_id` et `control_id`, protection contre les révisions périmées, battement de cœur (`signal_presence`) en pause et rejet strict des messages non conformes.
 - Sauvegarde de l'ancienne base v1 (`outputs/greenmind.v1.sqlite.bak`) et validation de la structure SQLite v2 propre (WAL, timeout 5000 ms, clés étrangères actives).
 - Suite de tests : 37 tests de pipeline (`tests/test_pipeline.py`) et suite complète `pytest` réussie (127 tests).
 - Preuve réelle sur deux processus et broker validée avec succès via `scripts/check_mqtt_pipeline.py`.
@@ -189,8 +189,8 @@ Prochaine brique : B5 — Trois arroseurs (boucle de commande proposition / conf
 
 ## 9. B5 — Trois arroseurs : réalisée le 28 octobre
 
-Fichiers : `domain/watering.py`, `simulator/watering.py`, `db/watering.py`,
-`api/watering.py`, contrats MQTT dans `schemas.py`, nouveaux modèles SQL,
+Fichiers : `domain/arrosage.py`, `simulator/arrosage.py`, `db/arrosage.py`,
+`api/arrosage.py`, contrats MQTT dans `schemas.py`, nouveaux modèles SQL,
 raccordements du moteur, du transport et de l’ingestion,
 `tests/test_watering.py` et `scripts/check_watering.py`.
 
@@ -199,7 +199,7 @@ Résultats :
 - Revalidation de fraîcheur, session, révision, seuil et repos. Propositions valables 60 secondes, suivi sans ACK déclaré incertain après 10 secondes, repos de 60 secondes réelles par bac.
 - Persistance avant envoi, clés d’idempotence et refus des confirmations concurrentes. Aucun renvoi automatique après échec, timeout ou redémarrage de l’API.
 - Une commande d’arrosage en cours dans toute la serre ; contrôles de simulation bloqués pendant une exécution incertaine ou l’attente de mesure après ACK.
-- Effet virtuel unique ciblé, horloge météo inchangée, ACK corrélé, suivi `EXECUTED`/`REJECTED`, timeout et résolution tardive journalisés. Télémétrie après effet et clôture de l’alerte ingérées atomiquement ensemble.
+- Effet virtuel unique ciblé, horloge météo inchangée, ACK corrélé, suivi `exécuté`/`refusé`, timeout et résolution tardive journalisés. Télémétrie après effet et clôture de l’alerte ingérées atomiquement ensemble.
 - **198 tests réussis** : cycle des trois bacs, isolement, doublons, concurrence, expiration, anciennes sessions, révisions, repos, durée plafonnée, validation réseau, rollback et reprise API sans republication.
 - Recette réelle `scripts/check_watering.py` réussie : timeout malgré PUBACK sur un topic sans consommateur, mutations bloquées, refus tardif corrélé ; pour chaque bac, proposition → confirmation → effet unique → ACK → mesure, puis rejouabilité REST/MQTT et repos vérifiés. Recette B4 de nouveau réussie.
 
@@ -212,3 +212,40 @@ verrou du projet. La recette utilise une base temporaire et arrête ses processu
 Aucune base de démonstration n’est effacée.
 
 Prochaine brique : **B6 — Deux pages Streamlit, lancement/arrêt et reset contrôlé**.
+
+
+## 10. B6 — Première interface et lanceur local, 28 octobre
+
+Deux vues Streamlit : cartes et courbes, propositions/confirmations et journal
+sur Serre ; pause/reprise/avance et injection sur Console. Tous les échanges
+passent par REST. Les clés de confirmation sont conservées dans la session UI.
+Le rafraîchissement est manuel par le bouton Actualiser.
+
+`scripts/demo.py start|stop|reset` lance les quatre services après Mosquitto,
+attend leur disponibilité et vérifie les processus enregistrés avant arrêt.
+Le reset conserve la base et crée une nouvelle session. Deux resets successifs
+et l’arrêt ont été exécutés avec succès ; un test Streamlit vérifie les deux vues.
+L’intégration RAG reste à réaliser en B7/B8.
+
+
+## 11. Nommage validé et contrat v3 — 28 octobre
+
+Les décisions de `Nommage_champs_valide.md` sont appliquées à la configuration,
+aux modèles, messages, API, interfaces, scripts et tests. MQTT utilise désormais
+`schema_version: 3` et `greenmind/v3`, pour refuser les anciens formats.
+Les clés lisibles sont allouées par compteurs atomiques persistants dans
+`outputs/identifiers.sqlite`, distinct de la base de serre. Leurs valeurs ne sont
+pas remises à zéro par le reset de session ou la reconstruction de la base.
+Les dates publiques et stockées utilisent l’heure belge et les précisions validées.
+
+À la demande de Jean, la base principale a été reconstruite sans conserver
+l’ancienne. La commande `scripts/reset_database.py` vérifie l’arrêt des services
+avant de reconstruire les tables ; elle préserve le fichier des compteurs.
+Les contrats techniques, le README et la documentation météo décrivent le format
+courant et la procédure de reconstruction.
+
+
+Validation du renommage : **209 tests réussis**. Les recettes MQTT réelles B3,
+B4 et B5 sont réussies au schéma 3. La démo a été redémarrée ; les réponses REST
+et les lignes SQLite ont été contrôlées avec les noms retenus, les identifiants
+lisibles et les dates belges. Aucun commit/push n’est inclus dans cette opération.
