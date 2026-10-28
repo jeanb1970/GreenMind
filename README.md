@@ -1,12 +1,12 @@
 # GreenMind 🌱
 
-**Une serre virtuelle pour comprendre la chaîne complète d’un système IoT : simulation, MQTT, stockage, API et commandes acquittées.**
+**Une serre connectée virtuelle associant simulation du réel, pilotage IoT et assistant horticole local.**
 
 GreenMind simule trois bacs indépendants — **basilic, thym et romarin** — soumis à une même journée météo synthétique. Chaque espèce possède son profil de dessèchement, ses seuils d’alerte et son arroseur virtuel. L’utilisateur peut faire évoluer la simulation, provoquer une sécheresse et confirmer un arrosage dont il suit ensuite l’exécution.
 
-Projet pédagogique en développement, conçu pour une démonstration locale. Les données et coefficients sont illustratifs : ils ne constituent ni des mesures réelles ni des recommandations agronomiques. Aucune pompe physique n’est pilotée.
+GreenMind est un **projet de fin de formation Architecte AIoT chez Technofutur TIC**. Il propose une simulation simplifiée d’une serre réelle : météo, évolution de l’humidité du sol et arrosage sont modélisés, tandis que les échanges MQTT, la persistance, le pilotage et les acquittements empruntent une véritable chaîne applicative. Les capteurs et actionneurs sont virtuels.
 
-## Ce qui fonctionne
+## Fonctionnalités
 
 - Une journée de 24 heures, avec une météo variable commune aux trois bacs.
 - Pause, reprise, avance d’une heure virtuelle et injection d’humidité sur un bac.
@@ -16,13 +16,19 @@ Projet pédagogique en développement, conçu pour une démonstration locale. Le
 - Arrosage en deux étapes : **proposition → confirmation → commande MQTT → acquittement → mesure après effet**.
 - Protection contre les doublons, anciennes sessions, révisions périmées et commandes concurrentes ; repos d’arrosage par bac et suivi des exécutions incertaines.
 
-Les briques **B1 à B5 sont réalisées**. Les deux pages Streamlit, les scripts de lancement/reset et l’assistant RAG intégré restent à construire. Les scripts d’expérimentation FAISS/MiniLM présents dans `scripts/` ne constituent pas encore un assistant applicatif.
+- Deux vues Streamlit : suivi de la serre et console de contrôle de la simulation.
+- Assistant horticole local fondé sur un RAG : réponses contextualisées par les mesures du bac et trois fiches Markdown sourcées, avec références aux sections utilisées.
+- Séparation entre explication et action : l’assistant ne déclenche aucun arrosage ; la confirmation reste une décision utilisateur.
+- Lancement, arrêt et réinitialisation contrôlés pour rejouer les scénarios.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    U[Utilisateur / documentation interactive] --> API[API REST FastAPI]
+    U[Utilisateur · Serre / Console Streamlit] --> API[API REST FastAPI]
+    API --> RAG[Assistant RAG local]
+    RAG --> CORPUS[Fiches horticoles sourcées]
+    RAG --> LLM[LLM local · Ollama]
     API -->|Contrôles et arrosages confirmés| MQTT[Broker Mosquitto]
     MQTT --> SIM[Simulateur des trois bacs]
     SIM -->|Mesures et acquittements| MQTT
@@ -53,7 +59,7 @@ source scripts/runtime_env.sh
 python -m pip install -r requirements.lock.txt
 ```
 
-Le fichier de dépendances inclut les bibliothèques des expérimentations IA. La partie IoT ne nécessite ni Ollama ni téléchargement de modèle. L’installation des dépendances et le premier téléchargement de l’image Docker nécessitent un accès réseau.
+La partie IA repose sur Ollama pour la génération locale, MiniLM pour les représentations vectorielles et FAISS pour la recherche documentaire. Les modèles, les dépendances, le corpus et l’image Docker sont préparés avant une utilisation hors ligne. La chaîne IoT reste utilisable indépendamment du service de génération.
 
 ## Essayer la simulation sans broker
 
@@ -102,11 +108,11 @@ La serre démarre **en pause au pas 0**. En lecture, une heure virtuelle s’éc
 - Santé des services : [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)
 - État des trois bacs : [http://127.0.0.1:8000/api/v1/plants](http://127.0.0.1:8000/api/v1/plants)
 
-Pour arrêter : `Ctrl+C` dans les trois terminaux, puis `docker compose stop mosquitto`. Pour rejouer la journée, relancer le simulateur après son arrêt : il crée une nouvelle session. Les données des anciennes sessions restent dans SQLite ; les vues courantes de l’API sélectionnent la plus récente. Les scripts de reset automatisé sont prévus en B6.
+Pour arrêter : `Ctrl+C` dans les trois terminaux, puis `docker compose stop mosquitto`. Pour rejouer la journée, relancer le simulateur après son arrêt : il crée une nouvelle session. Les données des anciennes sessions restent dans SQLite ; les vues courantes de l’API sélectionnent la plus récente.
 
 ### Configuration
 
-Les profils et les coefficients sont définis dans [`config/greenhouse.yaml`](config/greenhouse.yaml). La météo de démonstration est décrite dans [`data/readme.md`](data/readme.md).
+Les profils et les coefficients sont définis dans [`config/greenhouse.yaml`](config/greenhouse.yaml). La météo simulée est décrite dans [`data/readme.md`](data/readme.md).
 
 | Variable | Valeur par défaut | Usage |
 |---|---|---|
@@ -116,7 +122,7 @@ Les profils et les coefficients sont définis dans [`config/greenhouse.yaml`](co
 | `GREENMIND_API_HOST` | `127.0.0.1` | Adresse d’écoute HTTP |
 | `GREENMIND_API_PORT` | `8000` | Port HTTP |
 
-Appliquer les mêmes paramètres MQTT aux trois services et le même chemin de base à l’ingestion et à l’API. Le broker fourni est lié à l’interface locale ; le PoC ne fournit pas d’authentification applicative.
+Appliquer les mêmes paramètres MQTT aux trois services et le même chemin de base à l’ingestion et à l’API. Le broker fourni est lié à l’interface locale ; l’application locale ne fournit pas d’authentification applicative.
 
 ## Utiliser l’API
 
@@ -134,7 +140,7 @@ La page `/docs` permet d’exécuter les requêtes et d’inspecter leurs schém
 | `POST /plants/{plant_id}/watering-commands` | Confirmation d’une proposition |
 | `GET /watering-commands/{command_id}` | Suivi de l’arrosage et attente éventuelle de sa mesure |
 
-Pour provoquer un cas de démonstration : lire la révision dans `/simulation`, puis envoyer un contrôle `SET_SOIL_MOISTURE` sur `thym_01` avec `value: 18.0` et cette `expected_revision`. Attendre son résultat `APPLIED`, demander une proposition d’arrosage avec un corps `{}`, puis confirmer son `proposal_id`. L’injection nécessite une simulation en pause.
+Pour simuler une sécheresse : lire la révision dans `/simulation`, puis envoyer un contrôle `SET_SOIL_MOISTURE` sur `thym_01` avec `value: 18.0` et cette `expected_revision`. Attendre son résultat `APPLIED`, demander une proposition d’arrosage avec un corps `{}`, puis confirmer son `proposal_id`. L’injection nécessite une simulation en pause.
 
 ### Identifiants et confirmation d’effet
 
@@ -153,8 +159,6 @@ La suite automatisée ne nécessite pas de broker actif :
 ```bash
 .venv/bin/python -m pytest tests -q
 ```
-
-État vérifié à la livraison de B5 : **198 tests réussis**.
 
 Pour les recettes avec le **vrai broker**, démarrer Mosquitto et arrêter préalablement les services Python manuels, puis lancer les scripts **l’un après l’autre** :
 
@@ -180,15 +184,31 @@ src/greenmind/
   ingestion/            Validation des messages et persistance
   db/                   Modèles SQLite et transactions
   api/                  API REST et publication des commandes
+  dashboard/            Vues Serre et Console
 scripts/                Contrôles locaux, recettes MQTT et essais IA
 tests/                  Tests automatisés
 ```
 
-## Documentation et suite du projet
+## Documentation
 
 - [Cahier des charges v1.4](docs/Cahier_des_Charges_v1.4_Serre.md)
-- [Plan de réalisation et résultats par brique](docs/Plan_de_realisation_v1.4.md)
 - [Contrats MQTT, API et arrosage](docs/contracts.md)
 - [Données et conventions de simulation](data/readme.md)
 
-La prochaine étape est **B6** : deux pages Streamlit — serre et console — et gestion du lancement, de l’arrêt et du reset. Les étapes suivantes portent sur trois fiches horticoles sourcées, un assistant local contextualisé et une démonstration reproductible hors ligne.
+## Interface et gestion des sessions
+
+Depuis la racine du projet, avec Docker démarré :
+
+```bash
+.venv/bin/python scripts/demo.py start
+.venv/bin/python scripts/demo.py stop
+.venv/bin/python scripts/demo.py reset
+```
+
+`start` lance Mosquitto puis ingestion, simulateur, API et Streamlit dans l’ordre.
+Ouvrir http://127.0.0.1:8501. Le menu propose Serre et Console ; utiliser
+**Actualiser** pour relire les états et acquittements. `stop` arrête uniquement
+les processus Python enregistrés par ce lanceur ; Mosquitto reste disponible.
+`reset` arrête ces processus puis les relance avec une nouvelle session, en
+conservant l’historique SQLite. Les journaux se trouvent dans `outputs/demo/`.
+Arrêter les services lancés manuellement avant d’utiliser le lanceur.
