@@ -18,7 +18,8 @@ from greenmind.ingestion.handler import ingest_telemetry
 
 LOGGER = logging.getLogger("greenmind.ingestion")
 
-TELEMETRY_TOPICS = [("greenmind/v2/plants/+/telemetry", 1), ("greenmind/v2/simulation/events", 1)]
+TELEMETRY_TOPICS = [("greenmind/v2/plants/+/telemetry", 1), ("greenmind/v2/simulation/events", 1),
+                    ("greenmind/v2/plants/+/events", 1)]
 STARTUP_TIMEOUT_S = 10.0
 CONNECTION_TIMEOUT_S = 5.0
 
@@ -124,8 +125,8 @@ def main() -> int:
                 fail("Confirmation reçue pour un abonnement inattendu.")
                 return
 
-            # Les deux abonnements doivent être accordés en QoS 1.
-            if len(reason_codes) != 2 or any(code != 1 for code in reason_codes):
+            # Tous les abonnements doivent être accordés en QoS 1.
+            if len(reason_codes) != len(TELEMETRY_TOPICS) or any(code != 1 for code in reason_codes):
                 fail(
                     "Le broker n'a pas accordé l'abonnement en QoS 1 : "
                     f"{reason_codes}."

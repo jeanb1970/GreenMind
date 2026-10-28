@@ -120,3 +120,57 @@ def telemetry_for_snapshot(snapshot: SimulationSnapshot, origin: str) -> tuple[T
         air_humidity_pct=snapshot.weather.air_humidity_pct, soil_moisture_sim_pct=value,
         pump_active=False, provenance=snapshot.weather.provenance, measurement_origin=origin,
     ) for plant_id, value in snapshot.soil_values)
+
+
+class WateringCommand(WireModel):
+    command_id: UUID
+    run_id: UUID
+    plant_id: PlantId
+    actuator_id: str
+    duration_sim_s: Annotated[float, Field(gt=0, le=10)]
+    expected_revision: Annotated[int, Field(ge=0)]
+    requested_at: AwareDatetime
+    expires_at: AwareDatetime
+
+    @field_validator('requested_at', 'expires_at')
+    @classmethod
+    def utc(cls, value: datetime) -> datetime:
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode='after')
+    def coherent_command(self) -> Self:
+        from greenmind.greenhouse_config import IDENTITIES
+        if self.actuator_id != IDENTITIES[self.plant_id][1]:
+            raise ValueError("L'arroseur doit correspondre au bac ciblé.")
+        if not timedelta(0) < self.expires_at - self.requested_at <= timedelta(seconds=60):
+            raise ValueError("La commande doit expirer dans les 60 secondes réelles.")
+        return self
+
+
+class WateringEvent(WireModel):
+    event_id: UUID
+    command_id: UUID
+    run_id: UUID
+    plant_id: PlantId
+    actuator_id: str
+    status: Literal['APPLIED', 'REJECTED']
+    resulting_revision: Annotated[int, Field(ge=0)]
+    simulated_at: AwareDatetime
+    emitted_at: AwareDatetime
+    soil_moisture_after_pct: Percentage
+    duration_applied_sim_s: Annotated[float, Field(ge=0, le=10)]
+    reason: str
+
+    @field_validator('simulated_at', 'emitted_at')
+    @classmethod
+    def utc(cls, value: datetime) -> datetime:
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode='after')
+    def coherent_result(self) -> Self:
+        from greenmind.greenhouse_config import IDENTITIES
+        if self.actuator_id != IDENTITIES[self.plant_id][1]:
+            raise ValueError("L'arroseur doit correspondre au bac ciblé.")
+        if (self.status == 'APPLIED') != (self.duration_applied_sim_s > 0):
+            raise ValueError("Seul un arrosage appliqué possède une durée positive.")
+        return self

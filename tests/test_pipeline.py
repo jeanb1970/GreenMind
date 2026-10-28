@@ -215,7 +215,7 @@ def test_ingestion_callback_rejects_retained_and_acknowledges(simulation, tmp_pa
         def subscribe(self, *args, **kwargs): return (0, 1)
         def loop_start(self):
             self.on_connect(self, None, None, SimpleNamespace(is_failure=False), None)
-            self.on_subscribe(self, None, 1, [1, 1], None)
+            self.on_subscribe(self, None, 1, [1] * len(service.TELEMETRY_TOPICS), None)
             self.on_message(self, None, SimpleNamespace(
                 topic=f'greenmind/v2/plants/{message.plant_id}/telemetry',
                 payload=message.model_dump_json().encode(), retain=retained, mid=7, qos=1,
@@ -240,13 +240,13 @@ def test_ingestion_callback_rejects_retained_and_acknowledges(simulation, tmp_pa
         db.dispose()
 
 
-def test_control_table_is_added_to_existing_v2_without_data_loss(simulation, tmp_path):
+def test_new_tables_are_added_to_existing_v2_without_data_loss(simulation, tmp_path):
     from sqlalchemy import MetaData, inspect
     from greenmind.db.models import Base
     from greenmind.db.readings import reserve_control, save_message
     metadata = MetaData()
     for table in Base.metadata.sorted_tables:
-        if table.name != 'simulation_controls':
+        if table.name not in {'simulation_controls', 'watering_proposals', 'watering_commands', 'watering_events'}:
             table.to_metadata(metadata)
     path = tmp_path / 'existing_v2.sqlite'
     original = create_database_engine(path, metadata=metadata)

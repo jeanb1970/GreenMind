@@ -188,3 +188,15 @@ class SimulationEngine:
         self._soil = {**self._soil, plant_id: float(value)}
         self._revision += 1
         return SimulationTransition("manual_override", before, self.snapshot(), plant_id)
+
+    def water(self, plant_id: str, duration_sim_s: float) -> SimulationTransition:
+        """Applique instantanément un gain virtuel, sans avancer l'heure météo."""
+        from greenmind.domain.watering import plan_watering
+        profile = self._config.get_plant(plant_id)
+        plan = plan_watering(profile, self._soil[plant_id])
+        if not isfinite(duration_sim_s) or abs(duration_sim_s - plan.duration_sim_s) > 1e-9:
+            raise ValueError("La durée ne correspond plus à la proposition déterministe.")
+        before = self.snapshot()
+        self._soil = {**self._soil, plant_id: plan.soil_moisture_after_pct}
+        self._revision += 1
+        return SimulationTransition("watering", before, self.snapshot(), plant_id)

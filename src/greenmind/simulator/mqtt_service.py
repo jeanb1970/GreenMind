@@ -10,8 +10,9 @@ from time import monotonic
 from uuid import uuid4
 import paho.mqtt.client as mqtt
 from greenmind.greenhouse_config import load_greenhouse_config
-from greenmind.schemas import SimulationControl, parse_v2, telemetry_for_snapshot
+from greenmind.schemas import SimulationControl, WateringCommand, parse_v2, telemetry_for_snapshot
 from greenmind.simulator.controls import ControlProcessor
+from greenmind.simulator.watering import WateringProcessor
 from greenmind.simulator.engine import SimulationEngine
 from greenmind.simulator.weather import load_weather
 
@@ -37,9 +38,11 @@ def main() -> int:
             raise RuntimeError("Un simulateur GreenMind utilise déjà ce verrou.") from None
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous_handlers[signum] = signal.signal(signum, lambda *_: stop.set())
-        engine = SimulationEngine(load_greenhouse_config(ROOT / "config/greenhouse.yaml"),
+        config = load_greenhouse_config(ROOT / "config/greenhouse.yaml")
+        engine = SimulationEngine(config,
                                   load_weather(ROOT / "data/fixtures/weather_greenhouse_day.csv"))
         processor = ControlProcessor(engine)
+        watering = WateringProcessor(engine, config)
         host = os.environ.get("GREENMIND_MQTT_HOST", "127.0.0.1").strip()
         port = int(os.environ.get("GREENMIND_MQTT_PORT", "1883"))
         if not host or not 1 <= port <= 65535:
@@ -52,11 +55,11 @@ def main() -> int:
             if reason_code.is_failure:
                 failed.set()
             else:
-                rc, _ = c.subscribe(CONTROL_TOPIC, qos=1)
+                rc, _ = c.subscribe([(CONTROL_TOPIC, 1), ('greenmind/v2/plants/+/commands', 1)])
                 if rc != mqtt.MQTT_ERR_SUCCESS:
                     failed.set()
         def on_subscribe(c, userdata, mid, reason_codes, properties):
-            if len(reason_codes) == 1 and reason_codes[0] == 1:
+            if len(reason_codes) == 2 and all(code == 1 for code in reason_codes):
                 ready.set()
             else:
                 failed.set()
@@ -64,7 +67,13 @@ def main() -> int:
             try:
                 if message.retain:
                     raise ValueError("Un contrôle retained est interdit.")
-                pending.put_nowait(parse_v2(SimulationControl, message.payload))
+                if message.topic == CONTROL_TOPIC:
+                    command = parse_v2(SimulationControl, message.payload)
+                else:
+                    command = parse_v2(WateringCommand, message.payload)
+                    if message.topic != f"greenmind/v2/plants/{command.plant_id}/commands":
+                        raise ValueError("Topic d'arrosage incohérent avec le bac ciblé.")
+                pending.put_nowait(command)
             except ValueError as error:
                 LOGGER.warning("Contrôle rejeté : %s", error)
             except Full:
@@ -110,9 +119,19 @@ def main() -> int:
             except Empty:
                 control = None
             if control is not None:
-                result = processor.apply(control)
-                publish_state(result.telemetry, result.event)
-                LOGGER.info("Contrôle %s : %s", control.control_id, result.event.status)
+                if isinstance(control, WateringCommand):
+                    result = watering.apply(control)
+                    # ACK d'abord : le suivi distingue explicitement une mesure
+                    # encore en transit d'une exécution non confirmée.
+                    publish(f"greenmind/v2/plants/{control.plant_id}/events", result.event)
+                    for message in result.telemetry:
+                        publish(f"greenmind/v2/plants/{message.plant_id}/telemetry", message)
+                    publish(EVENT_TOPIC, processor.state_event())
+                    LOGGER.info("Arrosage %s : %s", control.command_id, result.event.status)
+                else:
+                    result = processor.apply(control)
+                    publish_state(result.telemetry, result.event)
+                    LOGGER.info("Contrôle %s : %s", control.control_id, result.event.status)
             transition = engine.poll()
             if transition is not None:
                 publish_state(telemetry_for_snapshot(transition.after, "model"), processor.state_event())

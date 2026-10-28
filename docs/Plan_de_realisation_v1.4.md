@@ -2,7 +2,7 @@
 
 **Date :** 27 octobre 2026.  
 **Cible :** [CDC v1.4](Cahier_des_Charges_v1.4_Serre.md).  
-**Avancement au 28 octobre :** B0 validée, **B1, B2, B3 et B4 réalisées et testées** ; B5–B9 à réaliser. Les trois bacs sont raccordés à MQTT, ingérés dans SQLite avec gestion atomique des alertes et du journal, et consultables/pilotables via l'API REST FastAPI (/api/v1).
+**Avancement au 28 octobre :** B0 validée, **B1, B2, B3, B4 et B5 réalisées et testées** ; B6–B9 à réaliser. Les trois bacs sont raccordés à MQTT, ingérés dans SQLite avec gestion atomique des alertes et du journal, et consultables/pilotables via l'API REST FastAPI (/api/v1).
 
 **Échéance confirmée : jeudi 5 novembre 2026.** Disponibilité : environ deux tiers des journées de semaine, **aucun travail le week-end**. Du 28 octobre au 4 novembre, six jours ouvrés représentent environ quatre journées pleines équivalentes, auxquelles s'ajoute seulement le reliquat disponible du 27 octobre. Aucun nombre d'heures quotidien n'est présumé.
 
@@ -185,3 +185,30 @@ Prochaine brique : B5 — Trois arroseurs (boucle de commande proposition / conf
 - L’API respecte `GREENMIND_DATABASE_PATH`, comme l’ingestion. L’ajout de la table des contrôles préserve les données des bases v2 existantes ; aucune base v1 n’est effacée ou migrée implicitement.
 - Les consignes obsolètes relatives au pipeline basilic v1.3 ont été remplacées dans la documentation des données et du plan. Le calcul pur de dessèchement reste utilisé par les trois bacs.
 - Validation : **159 tests réussis sans avertissement**, recettes MQTT B3 et B4 réussies avec Mosquitto local, et contrôle de l’environnement réussi. La recette B4 vérifie aussi le rejeu REST après acquittement et le refus d’une collision de clé.
+
+
+## 9. B5 — Trois arroseurs : réalisée le 28 octobre
+
+Fichiers : `domain/watering.py`, `simulator/watering.py`, `db/watering.py`,
+`api/watering.py`, contrats MQTT dans `schemas.py`, nouveaux modèles SQL,
+raccordements du moteur, du transport et de l’ingestion,
+`tests/test_watering.py` et `scripts/check_watering.py`.
+
+Résultats :
+- Proposition déterministe sous le seuil bas, durée plafonnée, motif et humidité prévue explicites ; confirmation séparée et proposition consommable une seule fois.
+- Revalidation de fraîcheur, session, révision, seuil et repos. Propositions valables 60 secondes, suivi sans ACK déclaré incertain après 10 secondes, repos de 60 secondes réelles par bac.
+- Persistance avant envoi, clés d’idempotence et refus des confirmations concurrentes. Aucun renvoi automatique après échec, timeout ou redémarrage de l’API.
+- Une commande d’arrosage en cours dans toute la serre ; contrôles de simulation bloqués pendant une exécution incertaine ou l’attente de mesure après ACK.
+- Effet virtuel unique ciblé, horloge météo inchangée, ACK corrélé, suivi `EXECUTED`/`REJECTED`, timeout et résolution tardive journalisés. Télémétrie après effet et clôture de l’alerte ingérées atomiquement ensemble.
+- **198 tests réussis** : cycle des trois bacs, isolement, doublons, concurrence, expiration, anciennes sessions, révisions, repos, durée plafonnée, validation réseau, rollback et reprise API sans republication.
+- Recette réelle `scripts/check_watering.py` réussie : timeout malgré PUBACK sur un topic sans consommateur, mutations bloquées, refus tardif corrélé ; pour chaque bac, proposition → confirmation → effet unique → ACK → mesure, puis rejouabilité REST/MQTT et repos vérifiés. Recette B4 de nouveau réussie.
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/check_watering.py
+```
+
+Le broker Mosquitto doit fonctionner et aucun autre simulateur ne doit détenir le
+verrou du projet. La recette utilise une base temporaire et arrête ses processus.
+Aucune base de démonstration n’est effacée.
+
+Prochaine brique : **B6 — Deux pages Streamlit, lancement/arrêt et reset contrôlé**.

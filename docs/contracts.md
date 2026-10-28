@@ -185,14 +185,79 @@ Les contrôles de l'horloge et de la serre sont émis par les services autorisé
 
 ---
 
-## 5. Contrats cibles des étapes suivantes
+## 5. Arrosage et API applicative
 
 ### 5.1. Commandes et acquittements d'arrosage (B5)
 
-- Topic de commande : `greenmind/v2/plants/{plant_id}/commands`
-  - Clés : `command_id`, `run_id`, `plant_id`, `actuator_id` (concordants avec la configuration de serre), `volume_ml` ou durée virtuelle, `expected_revision`, horodatages d'émission et d'expiration.
-- Topic d'acquittement : `greenmind/v2/plants/{plant_id}/events`
-  - Clés : `event_id`, `command_id`, `status` (`APPLIED` / `REJECTED`), `volume_dispensed_ml`, `soil_moisture_after_pct`, `resulting_revision`.
+Le parcours exige deux appels distincts : demande de proposition, puis confirmation
+explicite de son identifiant. Une proposition ne publie rien sur MQTT.
+
+- `POST /api/v1/plants/{plant_id}/watering-proposals` : corps `{}` ou
+  `{"proposal_id": "UUID"}` pour permettre un rejeu idempotent. Retour `201` :
+  proposition, session, révision, durée virtuelle, humidités avant/après prévues,
+  motif, indicateur `capped` et expiration réelle à 60 secondes.
+- `POST /api/v1/plants/{plant_id}/watering-commands` : corps
+  `{"proposal_id": "UUID", "command_id": "UUID"}`. `command_id` est optionnel,
+  mais le client doit le conserver pour rejouer sa confirmation. Retour `202`
+  avec l'identifiant et le suivi courant ; ce code ne prouve pas l'exécution.
+- `GET /api/v1/watering-commands/{command_id}` : état persistant, motif,
+  révision résultante et `measurement_pending`. Une commande inconnue donne `404`.
+
+La confirmation revalide session, révision, humidité sous le seuil bas, fraîcheur
+d'émission de moins de 10 secondes et repos réel de 60 secondes par bac. Les bacs
+doivent être synchronisés sur la révision courante. Une proposition est consommée
+une seule fois. Une présence sans changement de révision ne l'invalide pas.
+La durée est `min(max_duration, (cible - humidité) / gain)` ; sa limite de dix
+secondes virtuelles et l'éventuel écart à la cible sont visibles dès la proposition.
+
+**Commande MQTT** — `greenmind/v2/plants/{plant_id}/commands`, QoS 1, non retenue :
+
+| Champ | Contrainte |
+|---|---|
+| `schema_version` | `2`, explicite sur le réseau |
+| `command_id`, `run_id` | UUID de la demande et de l'exécution visée |
+| `plant_id`, `actuator_id` | Correspondance exacte entre topic, bac et configuration |
+| `duration_sim_s` | Nombre fini strictement positif, au plus 10 secondes virtuelles |
+| `expected_revision` | Entier positif ou nul, égal à la révision du moteur |
+| `requested_at`, `expires_at` | Dates réelles avec fuseau ; expiration API à 10 secondes, contrat réseau au plus 60 secondes |
+
+**Acquittement MQTT** — `greenmind/v2/plants/{plant_id}/events`, QoS 1, non retenu :
+
+| Champ | Contrainte |
+|---|---|
+| `schema_version` | `2` |
+| `event_id`, `command_id`, `run_id` | UUID de l'événement, de la commande et de la session du simulateur |
+| `plant_id`, `actuator_id` | Bac et arroseur concordants avec le topic et la configuration |
+| `status` | `APPLIED` ou `REJECTED` |
+| `resulting_revision` | Révision après application ou refus |
+| `simulated_at`, `emitted_at` | Heure virtuelle inchangée et date réelle du résultat |
+| `soil_moisture_after_pct` | Humidité après traitement, entre 0 et 100 |
+| `duration_applied_sim_s` | Durée positive si appliqué, zéro si refusé |
+| `reason` | Motif français |
+
+Le gain est instantané et virtuel ; il ne fait pas avancer le pas météo. Seul le
+bac ciblé reçoit l'origine `watering`, les deux autres une présence du même état.
+Le simulateur vérifie à nouveau session, révision, expiration, durée déterministe,
+seuil et repos. Les contrôles et arrosages passent par le même thread d'exécution.
+Un doublon identique renvoie exactement le résultat initial sans deuxième effet.
+
+Le cycle SQL est `PENDING → SENT → EXECUTED / REJECTED / TIMED_OUT`.
+L'intention et le journal sont persistés avant la publication ; `SENT` indique
+l'engagement de l'envoi, pas son exécution. Le délai de dix secondes est évalué
+à la consultation du suivi et lors des demandes d'arrosage. Un échec de publication
+retourne `503` avec `command_id` et conserve une exécution incertaine. Aucun rejeu
+REST d'une confirmation ni redémarrage de l'API ne republie un arrosage.
+Une même clé avec une autre proposition ou un autre bac retourne `409`.
+
+Une seule commande peut être en cours dans la serre. Une commande incertaine
+bloque toute nouvelle mutation jusqu'à son acquittement tardif ou au redémarrage
+contrôlé de la simulation. Un acquittement `APPLIED` donne `EXECUTED` ; tant que la
+mesure correspondante n'est pas ingérée, `measurement_pending` reste vrai et les
+nouvelles mutations sont refusées. L'ingestion du résultat et la transition du
+suivi/journal forment une transaction. Les mesures et leurs alertes ont leur propre
+transaction atomique. Un acquittement tardif est corrélé et journalisé sans renvoi.
+Les tables `watering_proposals`, `watering_commands` et `watering_events` sont
+ajoutées sans supprimer les données v2 existantes.
 
 ### 5.2. Surface d'API REST applicative (B4)
 

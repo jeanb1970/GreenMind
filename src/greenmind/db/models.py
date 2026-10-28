@@ -96,3 +96,41 @@ class GreenhouseEventRow(Base):
     details_json: Mapped[str] = mapped_column(String, default="{}")
 
 
+
+
+class WateringProposalRow(Base):
+    __tablename__ = 'watering_proposals'
+    proposal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('simulation_runs.run_id'))
+    plant_id: Mapped[str] = mapped_column(String(50))
+    state_revision: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[str] = mapped_column(String(27))
+    payload: Mapped[str] = mapped_column(String)
+    consumed_by: Mapped[str | None] = mapped_column(String(36), unique=True)
+
+
+class WateringCommandRow(Base):
+    __tablename__ = 'watering_commands'
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'SENT', 'EXECUTED', 'REJECTED', 'TIMED_OUT')"),
+        Index('ix_watering_run_plant', 'run_id', 'plant_id'),
+    )
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey('watering_proposals.proposal_id'), unique=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('simulation_runs.run_id'))
+    plant_id: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20))
+    expires_at: Mapped[str] = mapped_column(String(27))
+    payload: Mapped[str] = mapped_column(String)
+    reason: Mapped[str] = mapped_column(String)
+    executed_at: Mapped[str | None] = mapped_column(String(27))
+    resulting_revision: Mapped[int | None] = mapped_column(Integer)
+
+
+class WateringEventRow(Base):
+    __tablename__ = 'watering_events'
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('simulation_runs.run_id'))
+    command_id: Mapped[str] = mapped_column(String(36), index=True)
+    received_at: Mapped[str] = mapped_column(String(27))
+    payload: Mapped[str] = mapped_column(String)

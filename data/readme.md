@@ -48,7 +48,9 @@ Le moteur local réalise uniquement les transitions d’état. Le service
 `simulator/mqtt_service.py` sérialise ses appels et publie les trois bacs en MQTT v2 ;
 `simulator/controls.py` vérifie les sessions, révisions, expirations et doublons.
 Un heartbeat est publié toutes les cinq secondes, y compris pendant la pause.
-Les commandes d’arrosage restent à réaliser en B5.
+Les arrosages virtuels sont traités par `simulator/watering.py` : confirmation
+via l’API, gain instantané sur le bac ciblé et acquittement corrélé, sans avancer
+l’heure météo. Le repos reste mesuré en secondes réelles.
 
 ### Contrôle reproductible
 

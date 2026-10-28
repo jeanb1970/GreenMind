@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from greenmind.api.routes import router
+from greenmind.api.watering import router as watering_router
 
 
 def create_app() -> FastAPI:
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(router)
+    app.include_router(watering_router)
 
     return app
 

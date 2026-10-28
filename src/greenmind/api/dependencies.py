@@ -32,13 +32,19 @@ def get_config() -> GreenhouseConfig:
 
 
 class MqttPublisher:
-    """Publication asynchrone sécurisée de contrôles vers le simulateur."""
+    """Publication QoS 1 des contrôles et arrosages vers le simulateur."""
 
     def __init__(self, host: str | None = None, port: int | None = None):
         self.host = host or os.environ.get("GREENMIND_MQTT_HOST", "127.0.0.1").strip()
         self.port = port or int(os.environ.get("GREENMIND_MQTT_PORT", "1883"))
 
     def publish_control(self, payload_json: str) -> None:
+        self._publish("greenmind/v2/simulation/controls", payload_json)
+
+    def publish_watering(self, plant_id: str, payload_json: str) -> None:
+        self._publish(f"greenmind/v2/plants/{plant_id}/commands", payload_json)
+
+    def _publish(self, topic: str, payload_json: str) -> None:
         client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"greenmind-api-pub-{uuid4().hex[:8]}",
@@ -49,7 +55,7 @@ class MqttPublisher:
             client.connect(self.host, self.port, keepalive=10)
             client.loop_start()
             info = client.publish(
-                "greenmind/v2/simulation/controls",
+                topic,
                 payload_json,
                 qos=1,
                 retain=False,

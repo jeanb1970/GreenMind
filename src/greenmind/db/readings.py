@@ -15,10 +15,11 @@ from greenmind.db.models import (
     SimulationEventRow,
     SimulationRun,
     SimulationControlRow,
+    WateringEventRow,
 )
 from greenmind.domain.alerts import next_dry_alert_state
 from greenmind.greenhouse_config import GreenhouseConfig, load_greenhouse_config
-from greenmind.schemas import SimulationControl, SimulationEvent, TelemetryV2
+from greenmind.schemas import SimulationControl, SimulationEvent, TelemetryV2, WateringEvent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config/greenhouse.yaml"
@@ -144,7 +145,7 @@ def _handle_simulation_event_side_effects(
 
 def save_message(
     engine,
-    message: TelemetryV2 | SimulationEvent,
+    message: TelemetryV2 | SimulationEvent | WateringEvent,
     *,
     config: GreenhouseConfig | None = None,
 ) -> bool:
@@ -158,6 +159,11 @@ def save_message(
         for key in ("observed_at", "simulated_at", "emitted_at"):
             values[key] = _utc_text(values[key])
         values["received_at"] = received_at
+    elif isinstance(message, WateringEvent):
+        model = WateringEventRow
+        values = dict(event_id=str(message.event_id), run_id=str(message.run_id),
+                      command_id=str(message.command_id), received_at=received_at,
+                      payload=message.model_dump_json())
     else:
         model = SimulationEventRow
         values = dict(event_id=str(message.event_id), run_id=str(message.run_id),
@@ -187,6 +193,9 @@ def save_message(
                            GreenhouseReading.event_id.desc()).limit(1))
                 if current_id == str(message.event_id):
                     _handle_telemetry_side_effects(session, message, received_at, active_config)
+            elif isinstance(message, WateringEvent):
+                from greenmind.db.watering import record_watering_event
+                record_watering_event(session, message)
             else:
                 _handle_simulation_event_side_effects(session, message, received_at)
 
@@ -221,6 +230,9 @@ def reserve_control(engine, command: SimulationControl) -> SimulationControl:
             if any(getattr(original, key) != getattr(command, key) for key in fields):
                 raise ValueError("Identifiant de contrôle réutilisé avec un contenu différent.")
             return original
+
+        from greenmind.db.watering import ensure_watering_idle
+        ensure_watering_idle(session, str(command.run_id))
 
         sample = session.scalar(select(GreenhouseReading).where(
             GreenhouseReading.run_id == str(command.run_id),
