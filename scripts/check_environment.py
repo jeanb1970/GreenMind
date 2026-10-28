@@ -34,7 +34,7 @@ REQUIRED_FILES = (
     "docker/mosquitto.conf",
     "config/greenhouse.yaml",
     "data/fixtures/weather_greenhouse_day.csv",
-    "data/README.md",
+    "data/readme.md",
     "docs/contracts.md",
     "src/greenmind/greenhouse_config.py",
     "src/greenmind/schemas.py",

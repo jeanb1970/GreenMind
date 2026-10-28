@@ -155,6 +155,7 @@ def main() -> int:
                     database_engine,
                     message.topic,
                     message.payload,
+                    retained=message.retain,
                 )
             except ValueError as error:
                 LOGGER.warning(

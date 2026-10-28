@@ -4,7 +4,9 @@ from greenmind.db.readings import save_message
 from greenmind.schemas import TelemetryV2, SimulationEvent, parse_v2
 
 
-def ingest_telemetry(engine, topic: str, payload: str | bytes) -> bool:
+def ingest_telemetry(engine, topic: str, payload: str | bytes, *, retained: bool = False) -> bool:
+    if retained:
+        raise ValueError("Un message MQTT retained est interdit.")
     if topic == "greenmind/v2/simulation/events":
         message = parse_v2(SimulationEvent, payload)
     else:

@@ -1,63 +1,13 @@
-# Données de démonstration GreenMind
+# Données de démonstration GreenMind v1.4
 
-## Origine
-
-Le fichier `fixtures/weather_sample.csv` contient 24 lignes de
-météo entièrement synthétique, créées pour le scénario
-`demo_dry_basil`.
-
-Ces données ne proviennent ni de capteurs physiques, ni
-d’Open-Meteo, ni d’observations météorologiques réelles.
-Aucune source externe n’a été utilisée pour les produire.
-
-## Contenu
-
-- Période fictive : 10 juillet 2026, de 00 h à 23 h UTC.
-- Intervalle entre deux lignes : une heure.
-- Température de l’air constante : 25 °C.
-- Humidité relative de l’air constante : 50 %.
-- Provenance : `synthetic_weather_plus_synthetic_soil`.
-
-Ces conditions constantes permettent de vérifier simplement
-la reproductibilité du calcul de dessèchement.
-
-## Horloges
-
-`observed_at` représente l’heure dans le scénario synthétique.
-Ce champ ne représente pas l’heure réelle d’exécution.
-
-Lors de la publication MQTT :
-- `emitted_at` indiquera l’heure UTC réelle d’émission ;
-- `simulated_tick` indiquera le numéro du pas de simulation.
-
-La cadence réelle de publication est distincte de l’intervalle
-horaire représenté par les données météo.
-
-## Humidité du substrat
-
-Le CSV ne contient pas l’humidité du substrat.
-Celle-ci sera calculée par le simulateur à partir de la météo
-et des paramètres définis dans `config/plants.yaml`.
-
-Elle est exprimée sur une échelle interne de 0 à 100,
-sans équivalence établie avec une mesure physique réelle.
-
-## Limites et utilisation
-
-Ces données servent uniquement aux tests et à la démonstration
-pédagogique. Elles ne permettent pas de formuler des prescriptions
-agronomiques ni de piloter une pompe physique.
-
-Le fichier CSV est conservé dans Git pour rendre les essais
-reproductibles. Aucun téléchargement météo n’est nécessaire
-pendant l’exécution.
-
-## Journée variable v1.4 — B2
+## Journée variable — trois bacs
 
 `fixtures/weather_greenhouse_day.csv` est la fixture du scénario
 `demo_greenhouse_day`, avec les profils de `config/greenhouse.yaml`.
-La fixture constante `weather_sample.csv` reste utilisée par le pipeline
-basilic v1 jusqu'à sa migration en B3.
+Cette fixture remplace l’ancien scénario constant `demo_dry_basil` de la v1.3.
+Le simulateur, les tests et les recettes MQTT utilisent tous cette journée commune.
+L’humidité du sol est calculée séparément pour chaque bac à partir des profils
+de `config/greenhouse.yaml`, sur une échelle pédagogique de 0 à 100.
 
 - Journée fictive du 10 juillet 2026, de 00:00 à 24:00 en Europe/Brussels.
 - 24 lignes, une par intervalle `[h, h+1h[`, dates explicites `+02:00`.
@@ -94,11 +44,11 @@ conserve des instantanés avant/après immuables ; le prochain calcul repart de 
 valeur imposée. Les snapshots ne permettent pas de modifier le moteur de l'extérieur.
 Pause/reprise incrémentent aussi la révision lors d'un changement effectif.
 
-Ce moteur local ne réalise pas encore le dédoublonnage des contrôles MQTT,
-les publications de présence, la validation d'une révision distante ni les
-verrous liés à l'arrosage. Ces responsabilités seront raccordées en B3/B5/B6.
-L'appelant devra sérialiser les appels au moteur ; les callbacks MQTT ne doivent
-pas le modifier concurremment.
+Le moteur local réalise uniquement les transitions d’état. Le service
+`simulator/mqtt_service.py` sérialise ses appels et publie les trois bacs en MQTT v2 ;
+`simulator/controls.py` vérifie les sessions, révisions, expirations et doublons.
+Un heartbeat est publié toutes les cinq secondes, y compris pendant la pause.
+Les commandes d’arrosage restent à réaliser en B5.
 
 ### Contrôle reproductible
 

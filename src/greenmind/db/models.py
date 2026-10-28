@@ -53,3 +53,46 @@ class SimulationEventRow(Base):
     payload: Mapped[str] = mapped_column(String)
 
 
+class SimulationControlRow(Base):
+    """Commande REST persistée avant publication, pour un rejeu exact après reprise."""
+    __tablename__ = "simulation_controls"
+    control_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.run_id"))
+    payload: Mapped[str] = mapped_column(String)
+
+
+class AlertRow(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (
+        CheckConstraint("status IN ('OPEN', 'CLOSED')"),
+        CheckConstraint("plant_id IN ('basilic_01', 'thym_01', 'romarin_01')"),
+        Index("ix_alerts_run_plant_status", "run_id", "plant_id", "status"),
+    )
+    alert_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.run_id"), index=True)
+    plant_id: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20))
+    opened_at: Mapped[str] = mapped_column(String(27))
+    closed_at: Mapped[str | None] = mapped_column(String(27), nullable=True)
+    opening_event_id: Mapped[str] = mapped_column(String(36))
+    closing_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    trigger_moisture_pct: Mapped[float] = mapped_column(Float)
+    resolved_moisture_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class GreenhouseEventRow(Base):
+    __tablename__ = "greenhouse_events"
+    __table_args__ = (
+        Index("ix_events_run_plant_seq", "run_id", "plant_id", "sequence"),
+    )
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.run_id"), index=True)
+    plant_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(27))
+    simulated_at: Mapped[str | None] = mapped_column(String(27), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
+    summary: Mapped[str] = mapped_column(String)
+    details_json: Mapped[str] = mapped_column(String, default="{}")
+
+

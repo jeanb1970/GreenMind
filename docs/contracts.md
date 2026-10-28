@@ -19,6 +19,7 @@
    - Chaque message porte son propre identifiant d'événement (`event_id` au format UUID v4).
    - L'état de la serre est ordonné par un compteur monotone de révision (`state_revision`). Une révision antérieure reçue en retard ne remplace jamais un état plus récent en base de données SQLite.
    - L'ingestion dédoublonne les messages via la contrainte d'unicité `PRIMARY KEY (event_id)` en base.
+   - Une télémétrie tardive reste dans l'historique, mais ne modifie pas les alertes ou le journal si elle précède l'état courant du bac (ordre : révision, émission UTC, identifiant d'événement).
 4. **Langue des messages** :
    - Tous les messages de motif, statuts textuels et diagnostics fonctionnels sont rédigés en français (ENF-11). Les identifiants techniques restent stables.
 
@@ -198,3 +199,6 @@ Les contrôles de l'horloge et de la serre sont émis par les services autorisé
 - Préfixe d'accès : `/api/v1` (FastAPI sur `127.0.0.1:8000`).
 - Les mutations asynchrones publiées sur MQTT retournent `202 Accepted` avec identifiant de suivi, jamais une garantie immédiate d'effet physique.
 - Consultation de l'état : `/api/v1/plants`, `/api/v1/plants/{plant_id}`, `/api/v1/events` (borné côté serveur), `/api/v1/simulation`.
+- `POST /api/v1/simulation/controls` accepte une clé `control_id` optionnelle. La commande est conservée dans SQLite (`simulation_controls`) avant publication. Un rejeu identique retourne `202` et conserve le message MQTT original, dates et session comprises ; il reste accepté après changement de révision. Une même clé avec une autre action, révision attendue, valeur ou plante retourne `409`.
+- Avant acquittement, un rejeu republie exactement le message initial ; après acquittement, aucune nouvelle publication n'est nécessaire. Un échec de publication retourne `503` et conserve la commande pour un nouvel essai, sans prolonger son expiration. `GET /api/v1/simulation/controls/{control_id}` expose le résultat d'exécution.
+- L'API et l'ingestion respectent `GREENMIND_DATABASE_PATH`. La nouvelle table des contrôles est créée de façon additive sur les bases v2 existantes ; les bases v1 restent refusées sans migration explicite.

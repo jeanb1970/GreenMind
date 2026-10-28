@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# GreenMind v1.3 — Configuration des bibliothèques natives
+# GreenMind — Configuration des bibliothèques natives
 # Contournement du plantage observé sur macOS avec une puce Apple M3.
 # La limitation des threads a permis de réussir les tests.
 # La cause native exacte du plantage reste indéterminée.

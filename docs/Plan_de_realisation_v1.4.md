@@ -2,7 +2,7 @@
 
 **Date :** 27 octobre 2026.  
 **Cible :** [CDC v1.4](Cahier_des_Charges_v1.4_Serre.md).  
-**Avancement au 27 octobre :** B0 validée, **B1, B2 et B3 réalisées et testées** ; B4–B9 à réaliser. Les trois bacs sont raccordés à MQTT (schéma v2) et ingérés dans SQLite avec dédoublonnage et contrôles d'état. Les contrôles MQTT et IA externes restent séparés.
+**Avancement au 28 octobre :** B0 validée, **B1, B2, B3 et B4 réalisées et testées** ; B5–B9 à réaliser. Les trois bacs sont raccordés à MQTT, ingérés dans SQLite avec gestion atomique des alertes et du journal, et consultables/pilotables via l'API REST FastAPI (/api/v1).
 
 **Échéance confirmée : jeudi 5 novembre 2026.** Disponibilité : environ deux tiers des journées de semaine, **aucun travail le week-end**. Du 28 octobre au 4 novembre, six jours ouvrés représentent environ quatre journées pleines équivalentes, auxquelles s'ajoute seulement le reliquat disponible du 27 octobre. Aucun nombre d'heures quotidien n'est présumé.
 
@@ -62,7 +62,7 @@ Même réduit, ce calendrier reste tendu, particulièrement le 2 novembre. Prép
 | B8 — Assistant intégré | Explications contextualisées pour chaque bac | `rag/assistant.py`, API assistant, front, tests/questions de recette | Mesures exactes, sources pertinentes, aucune action depuis le LLM, timeout sans blocage IoT |
 | B9 — Gel et soutenance | Parcours complet répétable et documenté | README, guide démo, résultats de recette, supports | A14-01 à A14-13, hors ligne, deux répétitions chronométrées, sauvegarde/capture de secours |
 
-B1/B2 utilisent d'abord des tests et contrôles locaux. La bascule publique des messages et de la configuration utilisée par le simulateur se fait de façon cohérente en B3 : ne pas laisser un nouveau YAML casser silencieusement le programme existant. Transition retenue : configuration v1.4 dans `config/greenhouse.yaml`, avec son chargeur, jusqu'à la bascule des consommateurs en B3. Le fichier `config/plants.yaml` et le chargeur v1 restent utilisés par le pipeline actuel ; ils seront retirés après sa migration.
+B1/B2 disposent de tests et contrôles locaux. La migration B3 est terminée : `config/greenhouse.yaml` est l’unique configuration, tous les producteurs et consommateurs utilisent le schéma MQTT v2. L’ancien fichier `config/plants.yaml` et son chargeur v1 ont été retirés.
 
 Le contrat des contrôles est défini en B3 ; son application par le simulateur et son suivi API sont terminés en B6. B4 utilise un producteur de test pour vérifier les mesures marquées `manual_override`, sans écrire directement dans les tables. B5 peut être démontrée via l'API avant la construction des fronts.
 
@@ -156,4 +156,32 @@ Résultats :
 - Suite de tests : 37 tests de pipeline (`tests/test_pipeline.py`) et suite complète `pytest` réussie (127 tests).
 - Preuve réelle sur deux processus et broker validée avec succès via `scripts/check_mqtt_pipeline.py`.
 
-Prochaine brique : B4, alertes, journal et API REST.
+Prochaine brique : B4, alertes, journal et API REST (réalisée ci-dessous).
+
+## 7. B4 — Alertes, journal et API REST : réalisée le 27 octobre
+
+Fichiers : `src/greenmind/db/models.py`, `src/greenmind/db/readings.py`,
+`src/greenmind/api/schemas.py`, `src/greenmind/api/dependencies.py`,
+`src/greenmind/api/routes.py`, `src/greenmind/api/app.py`, `src/greenmind/api/main.py`,
+`tests/test_alerts.py`, `tests/test_api.py`, `scripts/check_api.py`.
+
+Résultats :
+- Persistance atomique des alertes (table `alerts`) et du journal d'événements (table `greenhouse_events`) lors de l'enregistrement de chaque mesure.
+- Détection du cycle complet de sécheresse selon les seuils propres à chaque bac (ouverture sous seuil bas, maintien jusqu'au réarmement, clôture atomique et réouverture ultérieure).
+- Journal unifié avec ordre monotone par séquence SQL, filtre optionnel par bac et limite serveur de 100 événements.
+- Surface REST FastAPI complète sous `/api/v1` : `GET /health`, `GET /plants`, `GET /plants/{plant_id}`, `GET /plants/{plant_id}/measurements`, `GET /events`, `GET /simulation`, `POST /simulation/controls` (202 avec clé d'idempotence et publication MQTT) et `GET /simulation/controls/{control_id}`.
+- Codes d'erreur conformes : 404 pour bac inconnu, 409 pour conflit de révision, 422 pour paramètre invalide.
+- Suite de tests : 8 nouveaux tests d'alertes (`tests/test_alerts.py`), 10 tests d'intégration API (`tests/test_api.py`), portant la suite globale à **145 tests réussis** (100 %).
+- Preuve réelle bout-en-bout validée par `scripts/check_api.py` (cycle complet : simulation -> Mosquitto -> ingestion -> SQLite atomique -> API REST FastAPI -> forçage -> alerte ouverte -> réarmement -> alerte fermée et journal).
+
+Prochaine brique : B5 — Trois arroseurs (boucle de commande proposition / confirmation / acquittement).
+
+
+## 8. Vérification et corrections B3/B4 — 28 octobre
+
+- Les messages MQTT portant le drapeau `retain` sont rejetés avant toute écriture, puis acquittés comme rejets définitifs.
+- Les mesures tardives restent consultables dans l’historique sans ouvrir ou fermer une alerte ni rejouer un forçage dépassé.
+- Les contrôles REST sont persistés dans `simulation_controls` avant publication. Les rejeux conservent exactement le même message MQTT, y compris après redémarrage de l’API ou échec de publication. Les collisions de contenu retournent 409 ; un contrôle déjà acquitté n’est pas republié.
+- L’API respecte `GREENMIND_DATABASE_PATH`, comme l’ingestion. L’ajout de la table des contrôles préserve les données des bases v2 existantes ; aucune base v1 n’est effacée ou migrée implicitement.
+- Les consignes obsolètes relatives au pipeline basilic v1.3 ont été remplacées dans la documentation des données et du plan. Le calcul pur de dessèchement reste utilisé par les trois bacs.
+- Validation : **159 tests réussis sans avertissement**, recettes MQTT B3 et B4 réussies avec Mosquitto local, et contrôle de l’environnement réussi. La recette B4 vérifie aussi le rejeu REST après acquittement et le refus d’une collision de clé.

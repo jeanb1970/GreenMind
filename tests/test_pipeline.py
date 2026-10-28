@@ -178,3 +178,87 @@ def test_override_and_running_refusal(simulation):
 def test_bad_control_arguments(simulation, changes):
     with pytest.raises(ValueError):
         control(simulation, **changes)
+
+
+@pytest.mark.parametrize('kind', ['telemetry', 'simulation_event'])
+def test_retained_messages_are_rejected_before_persistence(simulation, db, kind):
+    if kind == 'telemetry':
+        message = telemetry_for_snapshot(simulation.snapshot(), 'initial')[0]
+        topic = f'greenmind/v2/plants/{message.plant_id}/telemetry'
+    else:
+        message = ControlProcessor(simulation).state_event()
+        topic = 'greenmind/v2/simulation/events'
+    with pytest.raises(ValueError, match='retained'):
+        ingest_telemetry(db, topic, message.model_dump_json(), retained=True)
+    assert count(db, SimulationRun) == 0
+    assert count(db, GreenhouseReading) == count(db, SimulationEventRow) == 0
+    assert ingest_telemetry(db, topic, message.model_dump_json())
+
+
+@pytest.mark.parametrize('retained', [True, False])
+def test_ingestion_callback_rejects_retained_and_acknowledges(simulation, tmp_path, monkeypatch, retained):
+    import importlib
+    import signal
+    from types import SimpleNamespace
+    service = importlib.import_module('greenmind.ingestion.main')
+    message = telemetry_for_snapshot(simulation.snapshot(), 'initial')[0]
+    handlers = {}
+    acknowledgements = []
+    def register(signum, handler):
+        previous = handlers.get(signum, signal.SIG_DFL)
+        handlers[signum] = handler
+        return previous
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        def reconnect_delay_set(self, **kwargs): pass
+        def connect_async(self, *args, **kwargs): pass
+        def subscribe(self, *args, **kwargs): return (0, 1)
+        def loop_start(self):
+            self.on_connect(self, None, None, SimpleNamespace(is_failure=False), None)
+            self.on_subscribe(self, None, 1, [1, 1], None)
+            self.on_message(self, None, SimpleNamespace(
+                topic=f'greenmind/v2/plants/{message.plant_id}/telemetry',
+                payload=message.model_dump_json().encode(), retain=retained, mid=7, qos=1,
+            ))
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return 0
+        def ack(self, mid, qos):
+            acknowledgements.append((mid, qos))
+            return 0
+        def disconnect(self): pass
+        def loop_stop(self): pass
+    path = tmp_path / 'callback.sqlite'
+    monkeypatch.setenv('GREENMIND_DATABASE_PATH', str(path))
+    monkeypatch.setattr(service.mqtt, 'Client', FakeClient)
+    monkeypatch.setattr(service.signal, 'signal', register)
+    assert service.main() == 0
+    db = create_database_engine(path)
+    try:
+        assert count(db, GreenhouseReading) == (0 if retained else 1)
+        assert acknowledgements == [(7, 1)]
+    finally:
+        db.dispose()
+
+
+def test_control_table_is_added_to_existing_v2_without_data_loss(simulation, tmp_path):
+    from sqlalchemy import MetaData, inspect
+    from greenmind.db.models import Base
+    from greenmind.db.readings import reserve_control, save_message
+    metadata = MetaData()
+    for table in Base.metadata.sorted_tables:
+        if table.name != 'simulation_controls':
+            table.to_metadata(metadata)
+    path = tmp_path / 'existing_v2.sqlite'
+    original = create_database_engine(path, metadata=metadata)
+    message = telemetry_for_snapshot(simulation.snapshot(), 'initial')[0]
+    save_message(original, message)
+    assert 'simulation_controls' not in inspect(original).get_table_names()
+    original.dispose()
+    upgraded = create_database_engine(path)
+    try:
+        assert 'simulation_controls' in inspect(upgraded).get_table_names()
+        assert latest_reading(upgraded, message.run_id, message.plant_id).event_id == str(message.event_id)
+        request = control(simulation)
+        assert reserve_control(upgraded, request) == request
+    finally:
+        upgraded.dispose()
