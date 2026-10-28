@@ -2,7 +2,7 @@
 
 **Date :** 27 octobre 2026.  
 **Cible :** [CDC v1.4](Cahier_des_Charges_v1.4_Serre.md).  
-**Avancement au 28 octobre :** B0 validée, **B1, B2, B3, B4 et B5 réalisées et testées** ; B6–B9 à réaliser. Les trois bacs sont raccordés à MQTT, ingérés dans SQLite avec gestion atomique des alertes et du journal, et consultables/pilotables via l'API REST FastAPI (/api/v1).
+**Avancement au 28 octobre :** B0 validée, **B1 à B7 réalisées et testées** ; B8–B9 à réaliser. Les trois bacs sont raccordés à MQTT, ingérés dans SQLite avec gestion atomique des alertes et du journal, et consultables/pilotables via l'API REST FastAPI (/api/v1).
 
 **Échéance confirmée : jeudi 5 novembre 2026.** Disponibilité : environ deux tiers des journées de semaine, **aucun travail le week-end**. Du 28 octobre au 4 novembre, six jours ouvrés représentent environ quatre journées pleines équivalentes, auxquelles s'ajoute seulement le reliquat disponible du 27 octobre. Aucun nombre d'heures quotidien n'est présumé.
 
@@ -249,3 +249,25 @@ Validation du renommage : **209 tests réussis**. Les recettes MQTT réelles B3,
 B4 et B5 sont réussies au schéma 3. La démo a été redémarrée ; les réponses REST
 et les lignes SQLite ont été contrôlées avec les noms retenus, les identifiants
 lisibles et les dates belges. Aucun commit/push n’est inclus dans cette opération.
+
+
+## 12. B7 — Corpus et index local : réalisée le 28 octobre
+
+Trois fiches originales en français dans `knowledge/`, sourcées auprès de la RHS
+et de University of Minnesota Extension. Neuf sections indexées, avec métadonnées
+strictes, extrait exact, chemin/ancre locale, URL, date de consultation et empreinte.
+Les seuils de simulation restent explicitement distincts des connaissances sources.
+
+`rag/corpus.py` valide et découpe les sections ; `rag/index.py` construit un index
+FAISS de vecteurs MiniLM normalisés. La révision du modèle est figée et chargée
+localement. Le manifeste lie modèle, empreintes et passages ; la publication par
+génération évite un couple manifeste/index partiellement remplacé. Une modification
+du corpus impose une reconstruction explicite.
+
+Validation : **224 tests réussis**, dont 15 tests documentaires. La recette réelle
+`check_knowledge.py --build` a construit puis rechargé neuf vecteurs de 384 dimensions
+avec MiniLM local et vérifié des citations pour chacune des trois espèces, en mode
+hors ligne. Procédure et sources : `docs/Corpus_horticole.md`.
+
+Prochaine brique : **B8 — Assistant local contextualisé, API et intégration dans la
+vue Serre**, avec limites de contexte, timeout et absence de pouvoir d’action du LLM.

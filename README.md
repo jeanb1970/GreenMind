@@ -185,6 +185,8 @@ src/greenmind/
   db/                   Modèles SQLite et transactions
   api/                  API REST et publication des commandes
   dashboard/            Vues Serre et Console
+  rag/                  Corpus et recherche documentaire locale
+knowledge/              Trois fiches horticoles sourcées
 scripts/                Contrôles locaux, recettes MQTT et essais IA
 tests/                  Tests automatisés
 ```
@@ -238,3 +240,17 @@ PYTHONPATH=src .venv/bin/python scripts/reset_database.py
 
 Pour une base distincte, passer `--database /chemin/vers/base.sqlite`.
 Le dictionnaire complet est dans [les noms et formats validés](docs/Nommage_champs_valide.md).
+
+
+## Corpus horticole local
+
+Les fiches [basilic](knowledge/basilic.md), [thym](knowledge/thym.md) et
+[romarin](knowledge/romarin.md) synthétisent les sources horticoles référencées
+dans leurs métadonnées. Chaque passage conserve sa section et un extrait exact
+pour permettre des citations locales vérifiables.
+
+Pour préparer le modèle MiniLM, construire l’index FAISS et vérifier la recherche
+hors ligne, suivre le [guide du corpus et de l’index](docs/Corpus_horticole.md).
+Les index sont reconstructibles et enregistrés dans `outputs/rag/knowledge/`.
+Une modification des fiches impose de reconstruire l’index pour conserver la
+correspondance entre passages et vecteurs.
