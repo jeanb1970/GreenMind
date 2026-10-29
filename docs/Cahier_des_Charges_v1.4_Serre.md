@@ -3,7 +3,6 @@
 **Version 1.4 — Serre à trois bacs et démonstration interactive**  
 **Date :** 27 octobre 2026  
 **Statut :** périmètre de soutenance resserré validé par Jean le 27 octobre 2026 ; paramètres pédagogiques à vérifier durant les briques. Ce document ne constitue pas une déclaration de fonctionnalités livrées.  
-**Référence précédente :** [v1.3](Cahier_des_Charges_v1.3_MVP.md), conservée comme historique.  
 **Plan de réalisation :** [Briques v1.4](Plan_de_realisation_v1.4.md).
 
 ## 1. Objectif et portée de la révision
@@ -35,7 +34,7 @@ Ces six évolutions font partie de la cible v1.4. Les restrictions « une seule 
 - Messages rédigés par GreenMind en français ; identifiants techniques stables, diagnostics tiers conservés.
 - Aucune garantie agronomique : les pourcentages et coefficients de simulation sont illustratifs.
 
-La validation pédagogique du sujet et la durée autorisée de présentation restent à confirmer. Le calendrier J1–J8 de la v1.3 est historique : il ne prouve pas la faisabilité de ce périmètre élargi dans le temps restant. **Échéance confirmée par Jean : être prêt jeudi 5 novembre 2026**, avec environ deux tiers des journées de semaine consacrés au projet et **aucun travail le week-end** ; aucune durée horaire d'une journée n'est présumée. Le plan associé vise un gel fonctionnel lundi 2 novembre au soir, puis réserve les 3 et 4 novembre à la recette finale, aux corrections bloquantes, aux supports et aux répétitions. La capacité du 28 octobre au 4 novembre représente six jours ouvrés à deux tiers, soit environ quatre journées pleines équivalentes, hors reliquat du 27 octobre. Les arbitrages validés pour tenir ce calendrier sont intégrés dans toutes les sections ci-dessous : deux pages dans une application, Markdown seul, une vitesse, avance de +1 heure et journal récent filtré par bac. Les PDF, la comparaison automatique par le RAG, les deux applications séparées et les commandes temporelles avancées sont reportés après la soutenance.
+La validation pédagogique du sujet et la durée autorisée de présentation restent à confirmer. **Échéance confirmée par Jean : être prêt jeudi 5 novembre 2026**, avec environ deux tiers des journées de semaine consacrés au projet et **aucun travail le week-end** ; aucune durée horaire d'une journée n'est présumée. Le plan associé vise un gel fonctionnel lundi 2 novembre au soir, puis réserve les 3 et 4 novembre à la recette finale, aux corrections bloquantes, aux supports et aux répétitions. La capacité du 28 octobre au 4 novembre représente six jours ouvrés à deux tiers, soit environ quatre journées pleines équivalentes, hors reliquat du 27 octobre. Les arbitrages validés pour tenir ce calendrier sont intégrés dans toutes les sections ci-dessous : deux pages dans une application, Markdown seul, une vitesse, avance de +1 heure et journal récent filtré par bac. Les PDF, la comparaison automatique par le RAG, les deux applications séparées et les commandes temporelles avancées sont reportés après la soutenance.
 
 ## 2. Modèle de serre et profils
 
@@ -86,7 +85,7 @@ Chaque ligne décrit les conditions appliquées durant l'intervalle `[h, h+1h[`.
 - `current_state` : compteur croissant des changements d'état, y compris injection et arrosage au même instant virtuel.
 - `simulation` : identifiant unique de l'exécution de démonstration.
 
-**Choix initial :** un pas = une heure virtuelle ; vitesse nominale = un pas toutes les cinq secondes réelles. Le bouton « +1 heure » exécute exactement un pas ; les heures intermédiaires ne sont pas sautées. Les mêmes paramètres, données et interventions aux mêmes pas donnent les mêmes valeurs et transitions ; identifiants et dates réelles peuvent différer.
+**Choix initial :** un pas = une heure virtuelle ; vitesse nominale = un pas toutes les cinq secondes réelles. Le bouton « Avancer d’une heure » exécute exactement un pas ; les heures intermédiaires ne sont pas sautées. Les mêmes paramètres, données et interventions aux mêmes pas donnent les mêmes valeurs et transitions ; identifiants et dates réelles peuvent différer.
 
 Le calcul existant reste une base réutilisable : perte horaire modulée par température et humidité de l'air, résultat borné entre 0 et 100. Les unités des coefficients deviennent explicites. Les trois bacs utilisent la même heure météo, chacun avec ses paramètres.
 
@@ -94,16 +93,16 @@ Le calcul existant reste une base réutilisable : perte horaire modulée par tem
 
 La pause arrête l'évolution temporelle, pas le service. Le simulateur continue à publier un état de présence et une télémétrie à période réelle fixe : mêmes valeurs, heure et révision, nouveaux `event_id`/`emitted_at`. Le front distingue « simulation en pause et connectée » de « simulateur indisponible ». Ces répétitions ne rouvrent pas d'alertes et ne surchargent pas le journal métier de messages « nouvelle mesure ».
 
-Les expirations de propositions, timeouts et repos d'arrosage restent en secondes réelles, indépendants de la vitesse. Leur durée restante est affichée. La fraîcheur dépend de la réception de données récentes, jamais d'une heure virtuelle avancée artificiellement. Une émission ancienne livrée tardivement ne redevient pas fraîche à sa seule ingestion.
+Les expirations de propositions, timeouts et repos d'arrosage restent en secondes réelles, indépendants de la vitesse. L'heure d'expiration de la proposition et la durée restante du repos lors d'un refus sont affichées. La fraîcheur dépend de la réception de données récentes, jamais d'une heure virtuelle avancée artificiellement. Une émission ancienne livrée tardivement ne redevient pas fraîche à sa seule ingestion.
 
 ## 4. Contrôle interactif de la simulation
 
-La seconde page, intitulée **Console de simulation**, propose :
+La seconde page, intitulée **Console · Mode simulation**, propose :
 
-1. L'état de connexion, le scénario, `simulation`, l'heure virtuelle et le mode pause/lecture.
+1. L'heure virtuelle (`simulated_at`), le pas (`heure_virtuelle`), la révision (`current_state`) et le mode pause/lecture (le scénario, `simulation` et `presence` étant aussi exposés par `GET /api/v1/simulation`).
 2. Pause et reprise à la vitesse unique de 1 heure virtuelle toutes les 5 secondes réelles.
-3. En pause : avancer exactement d'une heure par clic.
-4. En pause : sélectionner un bac, saisir une humidité finie entre 0 et 100, puis cliquer « Appliquer la valeur simulée ».
+3. En pause : avancer exactement d'une heure par clic (« Avancer d’une heure »). Au pas 24, « Jour suivant » rejoue le même profil en conservant l’état final des bacs, dans la même simulation ; retour au pas 0 en pause et numéro de cycle incrémenté.
+4. En pause : sélectionner un bac, choisir une humidité entre 0 et 100, puis cliquer « Imposer cette humidité ».
 5. Le statut de l'intervention et un lien logique vers ses événements et nouvelles mesures.
 
 **Sémantique de la modification à l'instant T :** remplacer l'état courant du substrat du seul bac choisi à l'heure virtuelle courante. La prochaine évolution repart de cette valeur. Ce n'est ni une réécriture des anciennes mesures, ni une panne de capteur simulée indépendante du substrat. L'événement garde la valeur avant/après et l'origine `modification_manuelle`. Une mesure d'humidité de l'air ne doit pas être confondue avec celle du substrat.
@@ -114,7 +113,7 @@ Les contrôles portent `control_id`, `simulation`, l'action, les arguments et la
 
 Chaque avance d'une heure reste une opération suivie ; l'interface n'annonce pas la fin avant l'acquittement et la disponibilité des révisions attendues en base. Une perte d'événement requiert un diagnostic ou un reset, pas une déclaration de réussite.
 
-Le retour en arrière et le reset en direct depuis le front ne font pas partie de la première livraison. Pour recommencer, utiliser le cycle contrôlé arrêt → reset → démarrage. Les routes de simulation sont activées uniquement par une configuration explicite du mode démo, lié au loopback ; elles retournent un refus lorsqu'il est désactivé. Ce mode n'est pas une authentification de production.
+Le retour en arrière et le reset en direct depuis le front ne font pas partie de la première livraison. Pour rejouer le profil météo en conservant les bacs, utiliser « Jour suivant » au pas 24. Pour une nouvelle session avec valeurs initiales, utiliser `demo.py reset`. Les routes de simulation sont activées uniquement par une configuration explicite du mode démo, lié au loopback ; elles retournent HTTP 403 lorsqu’il est désactivé, avant toute écriture de contrôle ou publication MQTT. L’API utilise `GREENMIND_SIMULATION_MODE=0` par défaut ; le lanceur de démo active explicitement la valeur `1`. Ce mode n'est pas une authentification de production.
 
 ## 5. Alertes et trois arroseurs
 
@@ -136,22 +135,23 @@ Cycle : `en_attente → envoyé → exécuté / refusé / TIMED_OUT`. Un timeout
 
 ## 6. Front principal et historique de la serre
 
-Le **Tableau de bord de la serre** présente :
+La vue **Serre** présente :
 
-- Trois cartes de bacs : espèce, humidité, seuils, alerte, état de l'arroseur et fraîcheur.
-- L'heure virtuelle, pause/lecture et météo commune, clairement marquées comme simulées.
-- Des courbes d'humidité par bac, avec seuils, marqueurs d'arrosage et injections manuelles.
+- Trois cartes de bacs : illustration, espèce (`display_name`), humidité du sol, état d’alerte, seuil bas, seuil de réarmement, seuil haut, cible d’arrosage, identité de l’arroseur et son état à la dernière mesure, ainsi que les commandes d’arrosage.
+- L’heure virtuelle, le pas, la révision et le mode pause/lecture dans le bandeau de statut, avec distinction entre présence récente, simulateur indisponible et absence de simulation initialisée. Les états sont réévalués à chaque actualisation.
+- La météo commune : température et humidité de l’air, intervalle appliqué et provenance. La mention « journée synthétique illustrative — ambiance de serre » accompagne le scénario synthétique. Une météo ancienne reste explicitement présentée comme dernière donnée enregistrée.
+- Une courbe commune d'humidité par bac sur l'horloge virtuelle, reliant les interventions par révision d'état (`current_state`).
 - Le parcours proposition → confirmation → suivi, avec le bac toujours visible.
 - L'assistant et ses sources locales.
 - Un journal des événements consultable sans accès aux logs du développeur.
 
 ### 6.1. Événements visibles
 
-Début de scénario, pause/reprise, avance demandée/appliquée/refusée, humidité imposée, ouverture/clôture d'alerte, proposition d'arrosage, refus, commande envoyée, exécution, timeout, acquittement tardif et incidents de service détectés. Les répétitions de présence et mesures ordinaires restent dans l'historique des mesures, pas dans le journal métier. Les pannes empêchant toute écriture sont signalées dans les logs et l'état de santé ; aucune exhaustivité fictive du journal SQL n'est annoncée.
+Pause/reprise, avance ou contrôle appliqué/refusé (`contrôle_appliqué`, `contrôle_refusé`), humidité imposée (`modification_manuelle`), ouverture/clôture d'alerte (`alerte_ouverte`, `alerte_clôturée`), proposition d'arrosage (`arrosage_proposé`), refus (`demande_arrosage_refusée`, `arrosage_refusé`), mise en attente et envoi (`arrosage_en_attente`, `arrosage_envoyé`, `arrosage_envoi_non_confirmé`), exécution (`arrosage_exécuté`), timeout (`arrosage_TIMED_OUT`), acquittement tardif (`late_ack`) et acquittement sans précommande (`arrosage_sans_précommande`). Les répétitions de présence et mesures ordinaires restent dans l'historique des mesures, pas dans le journal métier. Les pannes empêchant toute écriture sont signalées dans les logs et l'état de santé ; aucune exhaustivité fictive du journal SQL n'est annoncée.
 
-Chaque événement possède un identifiant, `simulation`, un type stable, un libellé français, la cible éventuelle, un instant réel et virtuel si connu, une origine (`simulator`, `rules`, `user`, `system`), un identifiant de corrélation et des détails structurés utiles. Les changements de valeur conservent avant/après. Les questions libres et prompts ne sont pas journalisés systématiquement.
+Chaque événement possède un numéro de séquence (`sequence`), un identifiant (`event_id`), `simulation`, un type stable (`event_type`), un résumé en français (`summary`), le bac éventuel (`plant_id`), un instant réel (`created_at`) et virtuel si connu (`simulated_at`), ainsi qu'un objet JSON `details` contenant les identifiants de corrélation et données structurées utiles. Les changements de valeur conservent avant/après. Les questions libres et prompts ne sont pas journalisés systématiquement.
 
-Afficher les 100 derniers événements de l'exécution courante, avec filtre par bac ou toute la serre ; limite maximale imposée côté serveur. Ordre déterministe par séquence d'ingestion, heures réelle et virtuelle affichées séparément. Le journal est persistant et reste visible après rafraîchissement. Les filtres temporels, la pagination navigable et les anciennes exécutions sont reportés. Le reset efface les données de démonstration selon la procédure annoncée.
+Afficher les 100 derniers événements de l'exécution courante, avec filtre par bac ou toute la serre ; limite maximale imposée côté serveur. Ordre déterministe par séquence d'ingestion, heures réelle et virtuelle affichées séparément. Le journal est persistant et reste visible après rafraîchissement. Les filtres temporels, la pagination navigable et les anciennes exécutions sont reportés. Le reset de session (`scripts/demo.py reset`) relance une nouvelle simulation en conservant l'historique SQLite ; la reconstruction explicite (`scripts/reset_database.py`) efface la base de serre tout en préservant les compteurs d'identifiants.
 
 ## 7. Assistant RAG sur les trois espèces
 
@@ -196,7 +196,7 @@ flowchart LR
 
 ### 8.1. Version des échanges et MQTT
 
-Le contrat actuellement implémenté reste décrit dans `docs/contracts.md`. Les ajouts d'horloge et de session sont une rupture : les nouveaux échanges utilisent `schema_version: 3` et le préfixe `greenmind/v3`. Tous les producteurs/consommateurs basculent ensemble en B3. Aucun mélange silencieux de schémas v1/v2/v3.
+Le contrat implémenté est décrit dans `docs/contracts.md`. Les échanges utilisent `schema_version: 3` et le préfixe `greenmind/v3`. Tous les producteurs et consommateurs utilisent exclusivement ce schéma.
 
 | Flux cible | Topic | Particularité |
 |---|---|---|
@@ -225,7 +225,7 @@ Préfixe HTTP `/api/v1` conservé pour la première API applicative, indépendan
 | `POST /plants/{plant_id}/arrosage-commands` | Confirmation, validation, publication |
 | `GET /arrosage-commands/{command_id}` | Suivi corrélé |
 | `GET /simulation` | Heure, mode, vitesse, révision, scénario et présence |
-| `POST /simulation/controls` | `pause`, `reprendre`, `avancer_1_heure` (+1 heure), `modifier_humidite_sol` |
+| `POST /simulation/controls` | `pause`, `reprendre`, `avancer_1_heure` (+1 heure), `jour_suivant`, `modifier_humidite_sol` |
 | `GET /simulation/controls/{control_id}` | Suivi de l'application du contrôle |
 | `POST /assistant/ask` | Question + bac sélectionné → faits, réponse, sources |
 
@@ -235,19 +235,19 @@ Erreurs : 404 pour cible inconnue ; 409 pour conflit/révision/expiration ; 422 
 
 ### 8.3. Persistance
 
-Tables cibles : `simulation_runs`, `sensor_readings`, `alerts`, `watering_commands`, `watering_events`, `simulation_controls`, `greenhouse_events`. Les événements de domaine liés à une mesure/transition sont écrits dans la même transaction que celle-ci. Les changements d'état des commandes et leurs événements sont également atomiques.
+Tables cibles : `simulation_runs`, `sensor_readings`, `simulation_events`, `simulation_controls`, `alerts`, `greenhouse_events`, `watering_proposals`, `watering_commands`, `watering_events`. Les événements de domaine liés à une mesure/transition sont écrits dans la même transaction que celle-ci. Les changements d'état des commandes et leurs événements sont également atomiques.
 
 Contraintes : `event_id` unique, corrélations uniques lorsque nécessaires, une alerte ouverte par bac/exécution, clés d'idempotence, index par exécution/bac/heure. Le journal métier utilise une séquence persistée pour un tri stable. La configuration et le manifeste RAG restent des fichiers versionnés/reconstructibles, sans seconde configuration mutable en base.
 
 L'envoi MQTT et l'écriture SQL ne forment pas une transaction distribuée : persister l'intention avant publication, suivre les échecs et ne jamais assimiler un statut SQL à une preuve d'effet. Au redémarrage, une opération sans résultat reste incertaine et n'est pas republiée automatiquement.
 
-`create_all()` ne migre pas les tables existantes. B3 prévoit une sauvegarde de la base de développement puis une reconstruction explicite des données de démo ou une migration documentée ; aucune ancienne base n'est supprimée implicitement au lancement.
+`create_all()` ne migre pas les tables existantes. Le code réalise séparément une migration additive ciblée de `sensor_readings.cycle` sur un schéma v3 compatible, avec valeur 1 pour les anciennes mesures, sans effacement. B3 prévoit une sauvegarde de la base de développement puis une reconstruction explicite des données de démo ou une migration documentée ; aucune ancienne base n'est supprimée implicitement au lancement.
 
 ## 9. Exploitation et démonstration reproductible
 
 - Préparer modèles, dépendances et corpus avant la séance ; préserver `scripts/runtime_env.sh` et ses limitations de threads avant les imports IA.
 - Conserver WAL, transactions courtes, `busy_timeout` ; aucune transaction SQL ouverte pendant une génération LLM.
-- Mosquitto configuré explicitement et lié à `127.0.0.1:1883` ; version/digest testé à figer. Ollama sur `127.0.0.1:11434`.
+- Mosquitto configuré explicitement et lié à `127.0.0.1:1883`. Ollama sur `127.0.0.1:11434`.
 - Le lanceur supervise les quatre processus, attend la disponibilité et le SUBACK d'ingestion avant les premières mesures. Un second lancement est refusé.
 - Une nouvelle exécution démarre en pause à l'heure initiale et publie trois mesures initiales, sans appliquer encore de dessèchement.
 - Les PID sont vérifiés avant arrêt, les connexions fermées proprement ; aucun arrêt global de Python ou Ollama.
@@ -295,9 +295,25 @@ Avant la séance : deux répétitions chronométrées depuis un reset, corpus et
 
 ## 12. État constaté et méthode de progression
 
-Inspection des fichiers le 27 octobre 2026 : configuration et schémas limités au basilic, fonction de dessèchement, lecteur météo, simulateur MQTT, ingestion, persistance des mesures et règle pure d'alerte présents. Les répertoires API, dashboard et RAG applicatif ne sont pas encore présents dans `src/greenmind`. Les scripts J1 de recherche vectorielle ne sont pas un assistant applicatif. Vérification de référence exécutée avec `source scripts/runtime_env.sh` puis `PYTHONPATH=src .venv/bin/python3 -m pytest tests -q` : **98 tests réussis**. Cela ne prouve pas le fonctionnement des services externes ni les futures fonctions v1.4.
+### Évolution livrée le 28 octobre — cycles répétés et disponibilité
 
-Un lancement initial non borné à `tests/` a aussi collecté les scripts de diagnostic J1 et a été interrompu : accès réseau restreint pour MQTT et tentatives Hugging Face. Les contrôles de services restent à exécuter séparément dans leur environnement autorisé ; ils ne sont pas déclarés réussis.
+Après une journée terminée, une commande doit permettre de poursuivre la même
+simulation en rejouant exactement le même profil météo de 24 heures. Chaque
+cycle commence avec l’état des bacs à la fin du cycle précédent, sans remise aux
+valeurs initiales. Le scénario reste une journée simulée fixe : aucun changement
+d’heure d’été/hiver ni calendrier civil à faire progresser. Les cycles sont
+numérotés J1, J2, etc. ; la courbe peut utiliser les heures écoulées cumulées
+(0–24, 24–48, etc.) pour distinguer les cycles malgré le profil météo répété.
+L’avancement de l’heure et des mesures doit être visible automatiquement en
+lecture. L’état initial reste en pause pour permettre la présentation des bacs.
+La console doit signaler la disponibilité de l’assistant local et de ses
+dépendances. Le lanceur doit proposer une reconstruction complète de la base
+et des compteurs, après arrêt vérifié des services et confirmation explicite de
+l’effacement. Ces évolutions sont réalisées : contrôle `jour_suivant` idempotent, cycle persisté, courbes en heures cumulées (1 000 mesures récentes par bac), supervision rafraîchie toutes les cinq secondes, santé de l’assistant toutes les dix secondes et commande `demo.py from-scratch` avec confirmation `EFFACER`. Le démarrage et chaque nouveau cycle restent en pause. La remise à zéro complète a été testée sur des fichiers temporaires, sans effacement de la démo.
+
+Inspection initiale des fichiers le 27 octobre 2026 : configuration et schémas limités au basilic, fonction de dessèchement, lecteur météo, simulateur MQTT, ingestion, persistance des mesures et règle pure d'alerte présents. Les répertoires API, dashboard et RAG applicatif n'étaient pas encore présents dans `src/greenmind`. Vérification de référence initiale exécutée avec `source scripts/runtime_env.sh` puis `PYTHONPATH=src .venv/bin/python3 -m pytest tests -q` : **98 tests réussis**.
+
+Les contrôles de services restent à exécuter séparément dans leur environnement autorisé ; ils ne sont pas déclarés réussis sans exécution explicite.
 
 La réalisation suit B0–B9 du plan associé. Chaque brique précise l'objectif, les fichiers, les tests et la manipulation de démonstration. On termine une petite tranche vérifiable et expliquée avant d'élargir la suivante. Les contrats cibles de ce CDC deviennent des contrats implémentés uniquement après adaptation et vérification du code.
 
@@ -305,7 +321,7 @@ La réalisation suit B0–B9 du plan associé. Chaque brique précise l'objectif
 
 Le périmètre resserré de soutenance est accepté par Jean. La configuration des trois profils est créée dans `config/greenhouse.yaml` et validée par `greenhouse_config.py`. Le calcul horaire pur de `domain/greenhouse.py` réutilise le dessèchement existant et produit un nouvel état indépendant par exécution. Le contrôle `scripts/check_greenhouse.py` affiche les trois évolutions et compare les alertes à 32 %.
 
-Résultat de la suite `pytest tests -q` : **127 tests réussis**. Les 29 nouveaux cas couvrent profils/identités/seuils invalides, isolation et déterminisme. Le pipeline existant utilise encore le YAML et les messages v1 du basilic ; sa migration cohérente vers les trois bacs est prévue en B3. B1 ne réalise ni arrosage ni publication MQTT multi-bacs.
+Résultat de la suite `pytest tests -q` : **127 tests réussis**. Les 29 nouveaux cas couvrent profils/identités/seuils invalides, isolation et déterminisme. La migration complète du pipeline vers les trois bacs est réalisée en B3. B1 ne réalise ni arrosage ni publication MQTT multi-bacs.
 
 
 ### 12.2. Livraison de la brique B2 — 27 octobre 2026
@@ -337,3 +353,27 @@ Les dates utilisent l’heure belge, avec secondes pour la météo et l’heure 
 et cinq décimales pour les instants précis. La base de serre antérieure est
 reconstruite explicitement sans conservation de son historique ; les compteurs
 restent persistants dans un stockage distinct.
+
+
+## 13. Architecture de réalisation et traçabilité — 29 octobre 2026
+
+La matrice détaillée [Cohérence code / CDC](Coherence_code_CDC.md) relie les
+entités, invariants, modules et responsabilités. Le domaine reste indépendant du
+réseau ; le moteur sérialise les transitions ; l’ingestion persiste atomiquement
+mesures, alertes et journal ; l’API expose les faits et contrôle les intentions ;
+le front utilise exclusivement REST. L’assistant produit une explication sourcée,
+sans capacité de commande. Les identités et profils proviennent de la configuration.
+
+Le front est séparé en `dashboard/app.py` (navigation et fragments), `client.py`
+(REST), `views.py` (présentation), `charts.py` (courbes) et `style.py` (apparence).
+`simulation_rules.py` regroupe les règles transversales et le type commun des
+contrôles REST/MQTT. La lecture conserve des limites distinctes : 1 000 mesures
+récentes par bac et 100 événements de journal, contrôlés côté stockage et API.
+Les tests de non-régression doivent couvrir le passage entre ces entités, pas
+seulement chaque calcul isolé. La recette finale B9 reste nécessaire pour valider
+les processus et transports réels dans les conditions de présentation.
+
+Présentation des courbes (29 octobre) : graduations horaires entières avec suffixe
+« H », graduations d’humidité avec suffixe « % », titres d’axes masqués. Hauteur
+510 px ; basilic vert vif clair, thym vert foncé et romarin violet. Les heures
+restent cumulées entre cycles, avec données et infobulles conservées.

@@ -1,4 +1,5 @@
 """Propositions, intentions MQTT et suivi d'arrosage transactionnels."""
+from greenmind.simulation_rules import PRESENCE_TTL_SECONDS
 from greenmind.time_formats import local_text, parse_local
 from greenmind.identifiers import next_id
 
@@ -10,10 +11,10 @@ from greenmind.db.models import (
     GreenhouseEventRow, GreenhouseReading, SimulationRun, WateringProposalRow,
     WateringCommandRow,
 )
-from greenmind.domain.watering import plan_watering
+from greenmind.domain.arrosage import plan_watering
 from greenmind.schemas import WateringCommand, WateringEvent
 
-FRESHNESS_SECONDS = 10
+FRESHNESS_SECONDS = PRESENCE_TTL_SECONDS
 ACK_TIMEOUT_SECONDS = 10
 
 

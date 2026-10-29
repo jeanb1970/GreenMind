@@ -17,6 +17,11 @@ REQUIRED_PACKAGES = (
     "pytest",
     "fastapi",
     "uvicorn",
+    "streamlit",
+    "altair",
+    "faiss-cpu",
+    "sentence-transformers",
+    "httpx2",
 )
 
 EXPECTED_ENVIRONMENT = {
@@ -30,19 +35,61 @@ REQUIRED_FILES = (
     "requirements.lock.txt",
     "scripts/runtime_env.sh",
     "scripts/check_database.py",
+    "scripts/check_greenhouse.py",
+    "scripts/check_simulation_day.py",
+    "scripts/check_mqtt_pipeline.py",
+    "scripts/check_api.py",
+    "scripts/check_arrosage.py",
+    "scripts/check_knowledge.py",
+    "scripts/check_assistant.py",
+    "scripts/demo.py",
+    "scripts/reset_database.py",
     "docker-compose.yml",
     "docker/mosquitto.conf",
     "config/greenhouse.yaml",
     "data/fixtures/weather_greenhouse_day.csv",
     "data/readme.md",
     "docs/contracts.md",
+    "docs/Nommage_champs_valide.md",
+    "docs/Corpus_horticole.md",
+    "docs/Assistant_local.md",
+    "knowledge/basilic.md",
+    "knowledge/thym.md",
+    "knowledge/romarin.md",
     "src/greenmind/greenhouse_config.py",
+    "src/greenmind/identifiers.py",
+    "src/greenmind/time_formats.py",
+    "src/greenmind/display.py",
     "src/greenmind/schemas.py",
     "src/greenmind/domain/simulation.py",
+    "src/greenmind/domain/greenhouse.py",
+    "src/greenmind/domain/alerts.py",
+    "src/greenmind/domain/arrosage.py",
     "src/greenmind/simulator/weather.py",
+    "src/greenmind/simulator/engine.py",
+    "src/greenmind/simulator/controls.py",
+    "src/greenmind/simulator/arrosage.py",
+    "src/greenmind/simulator/mqtt_service.py",
     "src/greenmind/simulator/main.py",
+    "src/greenmind/ingestion/handler.py",
+    "src/greenmind/ingestion/main.py",
     "src/greenmind/db/models.py",
     "src/greenmind/db/session.py",
+    "src/greenmind/db/readings.py",
+    "src/greenmind/db/arrosage.py",
+    "src/greenmind/api/schemas.py",
+    "src/greenmind/api/dependencies.py",
+    "src/greenmind/api/routes.py",
+    "src/greenmind/api/arrosage.py",
+    "src/greenmind/api/assistant.py",
+    "src/greenmind/api/app.py",
+    "src/greenmind/api/main.py",
+    "src/greenmind/rag/corpus.py",
+    "src/greenmind/rag/index.py",
+    "src/greenmind/rag/assistant.py",
+    "src/greenmind/dashboard/app.py",
+    "src/greenmind/dashboard/charts.py",
+    "src/greenmind/dashboard/style.py",
 )
 
 
@@ -74,7 +121,7 @@ def main() -> int:
         "Environnement virtuel appartenant à ce projet.",
     )
 
-    print("\n=== Dépendances de J2 ===")
+    print("\n=== Dépendances ===")
     for package in REQUIRED_PACKAGES:
         try:
             installed_version = version(package)

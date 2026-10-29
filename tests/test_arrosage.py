@@ -12,7 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from greenmind.api.app import create_app
 from greenmind.api.dependencies import get_config, get_db, get_publisher
-from greenmind.db import watering
+from greenmind.db import arrosage as watering
 from greenmind.db.models import WateringCommandRow, WateringEventRow
 from greenmind.db.readings import save_message, active_alert, list_events
 from greenmind.db.session import create_database_engine
@@ -20,7 +20,7 @@ from greenmind.greenhouse_config import load_greenhouse_config
 from greenmind.ingestion.handler import ingest_telemetry
 from greenmind.schemas import WateringCommand, telemetry_for_snapshot
 from greenmind.simulator.engine import SimulationEngine
-from greenmind.simulator.watering import WateringProcessor
+from greenmind.simulator.arrosage import WateringProcessor
 from greenmind.simulator.weather import load_weather
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +44,7 @@ def system(tmp_path, monkeypatch):
             self.published.append(WateringCommand.model_validate_json(payload))
         def publish_control(self, payload): pass
     publisher = Publisher()
-    app = create_app()
+    app = create_app(simulation_mode=True)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: config
     app.dependency_overrides[get_publisher] = lambda: publisher
@@ -57,17 +57,17 @@ def system(tmp_path, monkeypatch):
 
 
 def propose(s, plant='thym', **payload):
-    return s.client.post(f'/api/v1/plants/{plant}/watering-proposals', json=payload)
+    return s.client.post(f'/api/v1/plants/{plant}/arrosage-proposals', json=payload)
 
 
 def confirm(s, proposal, plant='thym', command_id=None):
-    return s.client.post(f'/api/v1/plants/{plant}/watering-commands', json={
+    return s.client.post(f'/api/v1/plants/{plant}/arrosage-commands', json={
         'proposal_id': proposal['proposal_id'], 'command_id': command_id or next_id("command"),
     })
 
 
 def track(s, command_id):
-    return s.client.get(f'/api/v1/watering-commands/{command_id}').json()
+    return s.client.get(f'/api/v1/arrosage-commands/{command_id}').json()
 
 
 def apply(s, command=None, telemetry=True):
@@ -271,11 +271,11 @@ def test_confirmation_requires_proposal_and_checks_key_content(system):
     assert confirm(s, {'proposal_id': next_id("proposal")}).status_code == 404
     proposal = propose(s).json()
     assert confirm(s, proposal, 'basilic').status_code == 404
-    assert s.client.post('/api/v1/plants/thym/watering-commands', json={'proposal_id': proposal['proposal_id'], 'watering_duration_s': 10}).status_code == 422
+    assert s.client.post('/api/v1/plants/thym/arrosage-commands', json={'proposal_id': proposal['proposal_id'], 'watering_duration_s': 10}).status_code == 422
     key = next_id("command")
     assert confirm(s, proposal, command_id=key).status_code == 202
     assert confirm(s, {'proposal_id': next_id("proposal")}, command_id=key).status_code == 409
-    assert s.client.get(f'/api/v1/watering-commands/{next_id("command")}').status_code == 404
+    assert s.client.get(f'/api/v1/arrosage-commands/{next_id("command")}').status_code == 404
     assert propose(s, 'inconnu').status_code == 404
 
 
@@ -322,16 +322,16 @@ def test_api_restart_preserves_uncertain_operation_without_republication(system)
     accepted = confirm(s, propose(s).json()).json()
     s.db.dispose()
     reopened = create_database_engine(Path(s.db.url.database))
-    app = create_app()
+    app = create_app(simulation_mode=True)
     app.dependency_overrides[get_db] = lambda: reopened
     app.dependency_overrides[get_config] = lambda: s.config
     app.dependency_overrides[get_publisher] = lambda: s.publisher
     s.now[0] += timedelta(seconds=11)
     try:
         with TestClient(app) as client:
-            response = client.get(f"/api/v1/watering-commands/{accepted['command_id']}")
+            response = client.get(f"/api/v1/arrosage-commands/{accepted['command_id']}")
             assert response.json()['status'] == 'TIMED_OUT'
-            assert client.post('/api/v1/plants/basilic/watering-proposals', json={}).status_code == 409
+            assert client.post('/api/v1/plants/basilic/arrosage-proposals', json={}).status_code == 409
             assert len(s.publisher.published) == 1
     finally:
         reopened.dispose()

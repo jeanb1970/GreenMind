@@ -12,7 +12,7 @@ import paho.mqtt.client as mqtt
 from greenmind.greenhouse_config import load_greenhouse_config
 from greenmind.schemas import SimulationControl, WateringCommand, parse_v3, telemetry_for_snapshot
 from greenmind.simulator.controls import ControlProcessor
-from greenmind.simulator.watering import WateringProcessor
+from greenmind.simulator.arrosage import WateringProcessor
 from greenmind.simulator.engine import SimulationEngine
 from greenmind.simulator.weather import load_weather
 

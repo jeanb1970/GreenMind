@@ -1,6 +1,8 @@
 """Persistance atomique et lecture des mesures, alertes et journal de la serre."""
 from greenmind.time_formats import local_text
+from greenmind.display import percent
 from greenmind.identifiers import next_id
+from greenmind.simulation_rules import MAX_MEASUREMENTS, MAX_JOURNAL_EVENTS
 
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -76,7 +78,7 @@ def _handle_telemetry_side_effects(
             created_at=received_at,
             simulated_at=local_text(message.simulated_at, False),
             event_type="alerte_ouverte",
-            summary=f"Alerte de sécheresse ouverte sur {bed.display_name} ({message.soil_moisture_pct:.1f} % < {bed.moist_low_pct:.1f} %).",
+            summary=f"Alerte de sécheresse ouverte sur {bed.display_name} ({percent(message.soil_moisture_pct)} < {percent(bed.moist_low_pct)}).",
             details=json.dumps({
                 "alert_id": new_alert_id,
                 "plant_id": message.plant_id,
@@ -96,7 +98,7 @@ def _handle_telemetry_side_effects(
             created_at=received_at,
             simulated_at=local_text(message.simulated_at, False),
             event_type="alerte_clôturée",
-            summary=f"Alerte de sécheresse levée sur {bed.display_name} ({message.soil_moisture_pct:.1f} % >= {bed.moist_rearm_pct:.1f} %).",
+            summary=f"Alerte de sécheresse levée sur {bed.display_name} ({percent(message.soil_moisture_pct)} > {percent(bed.moist_rearm_pct)}).",
             details=json.dumps({
                 "alert_id": active.alert_id,
                 "plant_id": message.plant_id,
@@ -106,6 +108,18 @@ def _handle_telemetry_side_effects(
         ))
 
     if message.measurement_origin == "modification_manuelle":
+        previous = session.scalar(
+            select(GreenhouseReading.soil_moisture_pct).where(
+                GreenhouseReading.simulation == str(message.simulation),
+                GreenhouseReading.plant_id == message.plant_id,
+                GreenhouseReading.event_id != str(message.event_id),
+            ).order_by(
+                GreenhouseReading.current_state.desc(),
+                GreenhouseReading.emitted_at.desc(),
+                func.length(GreenhouseReading.event_id).desc(),
+                GreenhouseReading.event_id.desc(),
+            ).limit(1)
+        )
         session.add(GreenhouseEventRow(
             event_id=next_id("event"),
             simulation=str(message.simulation),
@@ -113,9 +127,11 @@ def _handle_telemetry_side_effects(
             created_at=received_at,
             simulated_at=local_text(message.simulated_at, False),
             event_type="modification_manuelle",
-            summary=f"Humidité imposée à {message.soil_moisture_pct:.1f} % sur {bed.display_name}.",
+            summary=f"Humidité imposée à {percent(message.soil_moisture_pct)} sur {bed.display_name}.",
             details=json.dumps({
                 "plant_id": message.plant_id,
+                "moist_before_pct": previous,
+                "moist_after_pct": message.soil_moisture_pct,
                 "soil_moisture_pct": message.soil_moisture_pct,
             }),
         ))
@@ -195,7 +211,7 @@ def save_message(
                 if current_id == str(message.event_id):
                     _handle_telemetry_side_effects(session, message, received_at, active_config)
             elif isinstance(message, WateringEvent):
-                from greenmind.db.watering import record_watering_event
+                from greenmind.db.arrosage import record_watering_event
                 record_watering_event(session, message)
             else:
                 _handle_simulation_event_side_effects(session, message, received_at)
@@ -234,7 +250,7 @@ def reserve_control(engine, command: SimulationControl) -> SimulationControl:
                 raise ValueError("Identifiant de contrôle réutilisé avec un contenu différent.")
             return original
 
-        from greenmind.db.watering import ensure_watering_idle
+        from greenmind.db.arrosage import ensure_watering_idle
         ensure_watering_idle(session, str(command.simulation))
 
         sample = session.scalar(select(GreenhouseReading).where(
@@ -272,7 +288,7 @@ def list_events(
     limit: int = 100,
 ) -> list[GreenhouseEventRow]:
     """100 derniers événements de la session courante, avec filtre bac optionnel."""
-    server_limit = min(max(1, limit), 100)
+    server_limit = min(max(1, limit), MAX_JOURNAL_EVENTS)
     with Session(engine) as session:
         query = select(GreenhouseEventRow).where(GreenhouseEventRow.simulation == str(simulation))
         if plant_id is not None:
@@ -285,17 +301,22 @@ def recent_readings(
     simulation: str,
     plant_id: str,
     limit: int = 24,
+    *,
+    include_presence: bool = True,
 ) -> list[GreenhouseReading]:
     """Mesures récentes d'un bac pour l'exécution courante, limite serveur imposée."""
-    server_limit = min(max(1, limit), 100)
+    server_limit = min(max(1, limit), MAX_MEASUREMENTS)
     with Session(engine) as session:
-        return list(session.scalars(
-            select(GreenhouseReading).where(
-                GreenhouseReading.simulation == str(simulation),
-                GreenhouseReading.plant_id == plant_id,
-            ).order_by(GreenhouseReading.current_state.desc(),
-                       GreenhouseReading.emitted_at.desc()).limit(server_limit)
-        ))
+        query = select(GreenhouseReading).where(
+            GreenhouseReading.simulation == str(simulation),
+            GreenhouseReading.plant_id == plant_id,
+        )
+        if not include_presence:
+            query = query.where(GreenhouseReading.measurement_origin != 'signal_presence')
+        return list(session.scalars(query.order_by(
+            GreenhouseReading.current_state.desc(), GreenhouseReading.emitted_at.desc(),
+            func.length(GreenhouseReading.event_id).desc(), GreenhouseReading.event_id.desc(),
+        ).limit(server_limit)))
 
 
 def latest_simulation(engine) -> str | None:

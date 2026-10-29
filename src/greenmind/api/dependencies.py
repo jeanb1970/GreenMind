@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from uuid import uuid4
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 import paho.mqtt.client as mqtt
 from greenmind.db.session import create_database_engine, DEFAULT_DATABASE_PATH
 from greenmind.greenhouse_config import GreenhouseConfig, load_greenhouse_config
@@ -13,6 +13,22 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config/greenhouse.yaml"
 
 _GLOBAL_ENGINE = None
 _GLOBAL_CONFIG = None
+
+
+def configured_simulation_mode() -> bool:
+    value = os.environ.get('GREENMIND_SIMULATION_MODE', '0').strip()
+    if value not in ('0', '1'):
+        raise ValueError('GREENMIND_SIMULATION_MODE doit valoir 0 ou 1.')
+    return value == '1'
+
+
+def get_simulation_mode(request: Request) -> bool:
+    return request.app.state.simulation_mode
+
+
+def require_simulation_mode(enabled: bool = Depends(get_simulation_mode)) -> None:
+    if not enabled:
+        raise HTTPException(status_code=403, detail='Mode simulation désactivé : contrôle refusé.')
 
 
 def get_db():

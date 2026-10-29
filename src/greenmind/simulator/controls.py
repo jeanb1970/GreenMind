@@ -19,7 +19,7 @@ class ControlProcessor:
         state = self.engine.snapshot()
         return SimulationEvent(
             event_id=next_id("event"), simulation=state.simulation, status="etat_actuel",
-            current_state=state.current_state, heure_virtuelle=state.heure_virtuelle,
+            cycle=state.cycle, current_state=state.current_state, heure_virtuelle=state.heure_virtuelle,
             simulated_at=state.simulated_at, emitted_at=datetime.now(timezone.utc),
             paused=state.paused, day_complete=state.day_complete, reason="État courant du simulateur.",
         )
@@ -51,9 +51,13 @@ class ControlProcessor:
                     self.engine.resume()
                 elif control.action == "avancer_1_heure":
                     self.engine.advance_one_hour()
+                elif control.action == "jour_suivant":
+                    self.engine.next_day()
                 else:
                     self.engine.set_soil_moisture(control.plant_id, control.moist_request_pct)
                 origin = "calcul_horaire" if control.action == "avancer_1_heure" else "signal_presence"
+                if control.action == "jour_suivant":
+                    origin = "jour_suivant"
                 messages = telemetry_for_snapshot(self.engine.snapshot(), origin)
                 if control.action == "modifier_humidite_sol":
                     messages = tuple(m.model_copy(update={"measurement_origin": "modification_manuelle"})

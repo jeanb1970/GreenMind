@@ -83,7 +83,7 @@ def main() -> int:
             simulation = rows[0].simulation
 
             # 2. Instanciation de l'API REST FastAPI avec le moteur SQLite du test
-            app = create_app()
+            app = create_app(simulation_mode=True)
             app.dependency_overrides[get_db] = lambda: db
             app.dependency_overrides[get_publisher] = lambda: MqttPublisher()
             client = TestClient(app)

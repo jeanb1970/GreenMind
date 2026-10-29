@@ -1,4 +1,5 @@
 """Modèles Pydantic pour l'API REST GreenMind (/api/v1)."""
+from greenmind.simulation_rules import SimulationAction
 from greenmind.identifiers import ControlId
 
 from typing import Annotated, Any, Literal
@@ -14,7 +15,7 @@ class HealthResponse(ApiModel):
     simulation: str | None
     database_connected: bool
     mqtt_connected: bool
-    simulation_mode: bool = True
+    simulation_mode: bool = False
 
 
 class AlertResponse(ApiModel):
@@ -33,6 +34,11 @@ class PlantSummary(ApiModel):
     bed_id: str
     arroseur_id: str
     display_name: str
+    moist_low_pct: float
+    moist_rearm_pct: float
+    moist_high_pct: float
+    moist_target_pct: float
+    arroseur_active: bool | None = None
     soil_moisture_pct: float | None = None
     air_temperature_c: float | None = None
     air_humidity_pct: float | None = None
@@ -46,10 +52,6 @@ class PlantSummary(ApiModel):
 
 
 class PlantDetail(PlantSummary):
-    moist_low_pct: float
-    moist_rearm_pct: float
-    moist_high_pct: float
-    moist_target_pct: float
     evaporation_pct_per_hour: float
     reference_temperature_c: float
     temperature_factor_per_c: float
@@ -64,6 +66,7 @@ class MeasurementItem(ApiModel):
     simulated_at: str
     emitted_at: str
     received_at: str
+    cycle: int = 1
     heure_virtuelle: int
     current_state: int
     soil_moisture_pct: float
@@ -86,7 +89,9 @@ class EventItem(ApiModel):
 
 
 class SimulationStateResponse(ApiModel):
+    simulation_mode: bool = False
     simulation: str | None = None
+    cycle: int = 1
     heure_virtuelle: int = 0
     current_state: int = 0
     simulated_at: str | None = None
@@ -94,10 +99,14 @@ class SimulationStateResponse(ApiModel):
     day_complete: bool = False
     scenario: str = "journee_serre"
     presence: bool = False
+    air_temperature_c: float | None = None
+    air_humidity_pct: float | None = None
+    observed_at: str | None = None
+    provenance: str | None = None
 
 
 class ControlRequest(ApiModel):
-    action: Literal["pause", "reprendre", "avancer_1_heure", "modifier_humidite_sol"]
+    action: SimulationAction
     expected_state: Annotated[int, Field(ge=0)]
     plant_id: Literal["basilic", "thym", "romarin"] | None = None
     moist_request_pct: Annotated[float, Field(ge=0, le=100)] | None = None

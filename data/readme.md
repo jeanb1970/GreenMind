@@ -4,7 +4,6 @@
 
 `fixtures/weather_greenhouse_day.csv` est la fixture du scénario
 `journee_serre`, avec les profils de `config/greenhouse.yaml`.
-Cette fixture remplace l’ancien scénario constant `demo_dry_basil` de la v1.3.
 Le simulateur, les tests et les recettes MQTT utilisent tous cette journée commune.
 L’humidité du sol est calculée séparément pour chaque bac à partir des profils
 de `config/greenhouse.yaml`, sur une échelle pédagogique de 0 à 100.

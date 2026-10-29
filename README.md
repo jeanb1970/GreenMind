@@ -100,9 +100,9 @@ Lancer ensuite les services **dans cet ordre** :
 |---|---|---|
 | 1 | `python -m greenmind.ingestion.main` | Attendre le message `Ingestion prête` |
 | 2 | `python -m greenmind.simulator.main` | Attendre le message `Simulateur prêt en pause` |
-| 3 | `python -m greenmind.api.main` | Attendre le démarrage du serveur HTTP |
+| 3 | `GREENMIND_SIMULATION_MODE=1 python -m greenmind.api.main` | Attendre le démarrage du serveur HTTP |
 
-La serre démarre **en pause au pas 0**. En lecture, une heure virtuelle s’écoule toutes les cinq secondes réelles. Au pas 24, la simulation s’arrête en pause.
+La serre démarre **en pause au pas 0**. En lecture, une heure virtuelle s’écoule toutes les cinq secondes réelles. Au pas 24, la simulation s’arrête en pause. **Jour suivant** rejoue le même profil météo de 24 heures en conservant les valeurs des bacs et la même session. Chaque cycle commence en pause ; les courbes suivent les heures cumulées (J1 : 0–24 h, J2 : 24–48 h). La date du scénario reste fixe.
 
 - Documentation interactive : [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - Santé des services : [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)
@@ -121,6 +121,7 @@ Les profils et les coefficients sont définis dans [`config/greenhouse.yaml`](co
 | `GREENMIND_DATABASE_PATH` | `outputs/greenmind.sqlite` | Base utilisée par l’ingestion et l’API |
 | `GREENMIND_API_HOST` | `127.0.0.1` | Adresse d’écoute HTTP |
 | `GREENMIND_API_PORT` | `8000` | Port HTTP |
+| `GREENMIND_SIMULATION_MODE` | `0` | `1` active les contrôles de simulation ; `0` les refuse avec HTTP 403 |
 
 Appliquer les mêmes paramètres MQTT aux trois services et le même chemin de base à l’ingestion et à l’API. Le broker fourni est lié à l’interface locale ; l’application locale ne fournit pas d’authentification applicative.
 
@@ -136,9 +137,10 @@ La page `/docs` permet d’exécuter les requêtes et d’inspecter leurs schém
 | `GET /simulation` | Session, horloge et révision courante |
 | `POST /simulation/controls` | `pause`, `reprendre`, `avancer_1_heure`, `modifier_humidite_sol` |
 | `GET /simulation/controls/{control_id}` | Résultat d’un contrôle |
-| `POST /plants/{plant_id}/watering-proposals` | Proposition déterministe sans effet sur la serre |
-| `POST /plants/{plant_id}/watering-commands` | Confirmation d’une proposition |
-| `GET /watering-commands/{command_id}` | Suivi de l’arrosage et attente éventuelle de sa mesure |
+| `POST /plants/{plant_id}/arrosage-proposals` | Proposition déterministe sans effet sur la serre |
+| `POST /plants/{plant_id}/arrosage-commands` | Confirmation d’une proposition |
+| `GET /arrosage-commands/{command_id}` | Suivi de l’arrosage et attente éventuelle de sa mesure |
+| `POST /assistant/ask` | Faits du bac, explication horticole et citations |
 
 Pour simuler une sécheresse : lire la révision dans `/simulation`, puis envoyer un contrôle `modifier_humidite_sol` sur `thym` avec `moist_request_pct: 18.0` et cette `expected_state`. Attendre son résultat `appliqué`, demander une proposition d’arrosage avec un corps `{}`, puis confirmer son `proposal_id`. L’injection nécessite une simulation en pause.
 
@@ -165,7 +167,7 @@ Pour les recettes avec le **vrai broker**, démarrer Mosquitto et arrêter préa
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/check_mqtt_pipeline.py
 PYTHONPATH=src .venv/bin/python scripts/check_api.py
-PYTHONPATH=src .venv/bin/python scripts/check_watering.py
+PYTHONPATH=src .venv/bin/python scripts/check_arrosage.py
 ```
 
 Chaque recette démarre ses propres services avec une base temporaire et les arrête ensuite. Une seule instance du simulateur peut détenir le verrou du projet. La recette d’arrosage couvre les trois bacs, les doublons, le repos, le timeout et un acquittement tardif.
@@ -207,12 +209,21 @@ Depuis la racine du projet, avec Docker démarré :
 .venv/bin/python scripts/demo.py reset
 ```
 
-`start` lance Mosquitto puis ingestion, simulateur, API et Streamlit dans l’ordre.
-Ouvrir http://127.0.0.1:8501. Le menu propose Serre et Console ; utiliser
-**Actualiser** pour relire les états et acquittements. `stop` arrête uniquement
+`start` lance Mosquitto puis ingestion, simulateur, API et Streamlit dans l’ordre,
+et active explicitement le mode simulation pour la démo. Un lancement manuel de
+l’API laisse ces contrôles désactivés sans `GREENMIND_SIMULATION_MODE=1`.
+L’activation exige une adresse HTTP loopback ; les valeurs autres que `0` et `1`
+sont refusées au démarrage. La configuration prend effet au démarrage de l’API.
+Ouvrir http://127.0.0.1:8501. Le menu propose Serre et Console. Le sélecteur
+**Apparence** permet de choisir **Clair** (fond lumineux, tuiles sauge) ou
+**Sombre** ; le choix reste actif pendant la navigation dans la session. Utiliser
+**Actualiser** pour relire immédiatement les états et acquittements. La supervision et les commandes se rafraîchissent aussi automatiquement toutes les cinq secondes, sans réinitialiser le formulaire de question à l’assistant. Le bandeau distingue une
+simulation connectée (en pause ou en lecture), une absence de simulation et un
+simulateur sans présence récente. Serre affiche la météo commune et sa provenance,
+les seuils de chaque bac ainsi que l’identité et le dernier état de son arroseur. `stop` arrête uniquement
 les processus Python enregistrés par ce lanceur ; Mosquitto reste disponible.
 `reset` arrête ces processus puis les relance avec une nouvelle session, en
-conservant l’historique SQLite. Les journaux se trouvent dans `outputs/demo/`.
+conservant l’historique SQLite. Pour repartir de zéro, utiliser `.venv/bin/python scripts/demo.py from-scratch` : saisir `EFFACER` pour confirmer l’arrêt des services et l’effacement de la base de serre **et des compteurs**. Cette commande ne relance pas la démo ; exécuter ensuite `start`. Les modèles et le corpus sont conservés. Les journaux se trouvent dans `outputs/demo/`.
 Arrêter les services lancés manuellement avant d’utiliser le lanceur.
 
 
@@ -225,7 +236,7 @@ l’heure météo/virtuelle, `2026-07-10 12:15:10.12345` pour les instants préc
 Les compteurs sont conservés séparément dans `outputs/identifiers.sqlite`.
 Tous les processus doivent utiliser le même `GREENMIND_IDENTIFIERS_PATH` si
 ce chemin est personnalisé. Ils ne sont réinitialisés ni par un reset de session,
-ni par la reconstruction de la base de serre. Un client peut réserver une clé via
+ni par la reconstruction ordinaire de la base de serre. La commande explicite `from-scratch` efface aussi ces compteurs. Un client peut réserver une clé via
 `POST /api/v1/identifiers/control`, `/proposal` ou `/command`, avec un corps `{}`,
 puis conserver cette clé pour ses tentatives de la même demande. Sinon, l’API
 alloue une clé lorsqu’elle crée une nouvelle demande sans identifiant fourni.
@@ -254,3 +265,17 @@ hors ligne, suivre le [guide du corpus et de l’index](docs/Corpus_horticole.md
 Les index sont reconstructibles et enregistrés dans `outputs/rag/knowledge/`.
 Une modification des fiches impose de reconstruire l’index pour conserver la
 correspondance entre passages et vecteurs.
+
+
+## Interroger l’assistant local
+
+Dans la vue **Serre**, choisir une plante puis poser une question sur l’eau,
+le drainage ou la culture en bac. Les faits de la serre et leur provenance sont
+affichés séparément de l’explication ; chaque source peut être dépliée pour lire
+son extrait local. Le chat ne déclenche aucune action sur les arroseurs.
+
+L’assistant utilise Ollama, avec `qwen3:4b-instruct` par défaut. Avant toute question, le front affiche son état : préparation, disponible ou indisponible. Le contrôle vérifie Ollama, la présence du modèle et la recherche dans le corpus/index local, sans générer de réponse. Cet état est rafraîchi toutes les dix secondes ; le contrôle documentaire est mis en cache trente secondes. Le modèle doit
+être présent localement ; `GREENMIND_LLM_MODEL` permet de choisir son nom et
+`GREENMIND_OLLAMA_URL` l’adresse du service. Une panne IA laisse l’API IoT
+consultable. La préparation et la recette sont décrites dans le
+[guide de l’assistant local](docs/Assistant_local.md).

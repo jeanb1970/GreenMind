@@ -86,7 +86,7 @@ def test_alert_opens_when_below_low_threshold(db, config):
     opened_events = [e for e in events if e.event_type == "alerte_ouverte"]
     assert len(opened_events) == 1
     assert "Basilic" in opened_events[0].summary
-    assert "34.0" in opened_events[0].summary
+    assert "34,00 %" in opened_events[0].summary
 
 
 def test_alert_remains_open_between_low_and_rearm_thresholds(db, config):
@@ -188,6 +188,10 @@ def test_events_limit_and_order(db, config):
     # Ordre strictement décroissant de séquence
     sequences = [e.sequence for e in all_events]
     assert sequences == sorted(sequences, reverse=True)
+    import json
+    latest_details = json.loads(all_events[0].details)
+    assert latest_details["moist_before_pct"] == 22.0 + 13
+    assert latest_details["moist_after_pct"] == 22.0 + 14
 
 
 def test_transaction_rollback_prevents_partial_alert_state(db):

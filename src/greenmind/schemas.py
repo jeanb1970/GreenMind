@@ -1,4 +1,5 @@
-"""Contrats MQTT v3 de la serre ; aucun message v1 n'est accepté ici."""
+"""Contrats MQTT v3 de la serre ; seule la version 3 du schéma est acceptée."""
+from greenmind.simulation_rules import SimulationAction
 from greenmind.time_formats import BelgianTime, BelgianInstant
 from greenmind.identifiers import next_id, SimulationId, EventId, ControlId, CommandId
 
@@ -26,6 +27,7 @@ class TelemetryV3(WireModel):
     observed_at: BelgianTime
     simulated_at: BelgianTime
     emitted_at: BelgianInstant
+    cycle: Annotated[int, Field(ge=1)] = 1
     heure_virtuelle: Annotated[int, Field(ge=0, le=24)]
     current_state: Annotated[int, Field(ge=0)]
     paused: bool
@@ -35,7 +37,7 @@ class TelemetryV3(WireModel):
     soil_moisture_pct: Percentage
     arroseur_active: bool
     provenance: Provenance
-    measurement_origin: Literal["initial", "calcul_horaire", "modification_manuelle", "arrosage", "signal_presence"]
+    measurement_origin: Literal["initial", "calcul_horaire", "modification_manuelle", "arrosage", "signal_presence", "jour_suivant"]
 
     @field_validator("observed_at", "simulated_at", "emitted_at")
     @classmethod
@@ -51,7 +53,7 @@ class TelemetryV3(WireModel):
         offset = timedelta(hours=1 if self.heure_virtuelle else 0)
         if self.simulated_at != self.observed_at + offset:
             raise ValueError("L'heure virtuelle doit correspondre à l'intervalle météo appliqué.")
-        if self.measurement_origin == "initial" and (self.heure_virtuelle or self.current_state):
+        if self.measurement_origin == "initial" and (self.cycle != 1 or self.heure_virtuelle or self.current_state):
             raise ValueError("Une mesure initiale doit être au pas et à la révision zéro.")
         return self
 
@@ -60,7 +62,7 @@ class SimulationControl(WireModel):
     control_id: ControlId
     simulation: SimulationId
     expected_state: Annotated[int, Field(ge=0)]
-    action: Literal["pause", "reprendre", "avancer_1_heure", "modifier_humidite_sol"]
+    action: SimulationAction
     requested_at: BelgianInstant
     expires_at: BelgianInstant
     plant_id: PlantId | None = None
@@ -89,6 +91,7 @@ class SimulationEvent(WireModel):
     control_id: ControlId | None = None
     status: Literal["etat_actuel", "appliqué", "refusé"]
     current_state: Annotated[int, Field(ge=0)]
+    cycle: Annotated[int, Field(ge=1)] = 1
     heure_virtuelle: Annotated[int, Field(ge=0, le=24)]
     simulated_at: BelgianTime
     emitted_at: BelgianInstant
@@ -115,7 +118,7 @@ def telemetry_for_snapshot(snapshot: SimulationSnapshot, origin: str) -> tuple[T
     return tuple(TelemetryV3(
         event_id=next_id("event"), simulation=snapshot.simulation, plant_id=plant_id,
         observed_at=snapshot.weather.observed_at, simulated_at=snapshot.simulated_at,
-        emitted_at=now, heure_virtuelle=snapshot.heure_virtuelle,
+        emitted_at=now, cycle=snapshot.cycle, heure_virtuelle=snapshot.heure_virtuelle,
         current_state=snapshot.current_state, paused=snapshot.paused,
         day_complete=snapshot.day_complete, air_temperature_c=snapshot.weather.air_temperature_c,
         air_humidity_pct=snapshot.weather.air_humidity_pct, soil_moisture_pct=value,

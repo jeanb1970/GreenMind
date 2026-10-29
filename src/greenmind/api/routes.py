@@ -1,4 +1,5 @@
 """Routes REST FastAPI (/api/v1) de la serre GreenMind."""
+from greenmind.simulation_rules import PRESENCE_TTL_SECONDS, MAX_MEASUREMENTS
 from greenmind.time_formats import parse_local
 from greenmind.identifiers import next_id, ControlId
 
@@ -6,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 import json
 import socket
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from greenmind.api.dependencies import get_config, get_db, get_publisher, MqttPublisher
+from greenmind.api.dependencies import (
+    get_config, get_db, get_publisher, get_simulation_mode, require_simulation_mode, MqttPublisher,
+)
 from greenmind.api.schemas import (
     AlertResponse,
     ControlAcceptedResponse,
@@ -38,6 +41,7 @@ router = APIRouter(prefix="/api/v1", tags=["Serre GreenMind"])
 def health_check(
     db=Depends(get_db),
     publisher: MqttPublisher = Depends(get_publisher),
+    simulation_mode: bool = Depends(get_simulation_mode),
 ):
     """Vérifie la santé des services, l'accès SQLite et la session active."""
     db_ok = False
@@ -66,7 +70,7 @@ def health_check(
         simulation=simulation,
         database_connected=db_ok,
         mqtt_connected=mqtt_ok,
-        simulation_mode=True,
+        simulation_mode=simulation_mode,
     )
 
 
@@ -101,6 +105,11 @@ def get_plants(
             bed_id=plant_cfg.bed_id,
             arroseur_id=plant_cfg.arroseur_id,
             display_name=plant_cfg.display_name,
+            moist_low_pct=plant_cfg.moist_low_pct,
+            moist_rearm_pct=plant_cfg.moist_rearm_pct,
+            moist_high_pct=plant_cfg.moist_high_pct,
+            moist_target_pct=plant_cfg.moist_target_pct,
+            arroseur_active=reading.arroseur_active if reading else None,
             soil_moisture_pct=reading.soil_moisture_pct if reading else None,
             air_temperature_c=reading.air_temperature_c if reading else None,
             air_humidity_pct=reading.air_humidity_pct if reading else None,
@@ -153,6 +162,7 @@ def get_plant_detail(
         bed_id=plant_cfg.bed_id,
         arroseur_id=plant_cfg.arroseur_id,
         display_name=plant_cfg.display_name,
+        arroseur_active=reading.arroseur_active if reading else None,
         soil_moisture_pct=reading.soil_moisture_pct if reading else None,
         air_temperature_c=reading.air_temperature_c if reading else None,
         air_humidity_pct=reading.air_humidity_pct if reading else None,
@@ -179,7 +189,8 @@ def get_plant_detail(
 @router.get("/plants/{plant_id}/measurements", response_model=list[MeasurementItem])
 def get_plant_measurements(
     plant_id: str,
-    limit: int = Query(24, ge=1, le=100),
+    limit: int = Query(24, ge=1, le=MAX_MEASUREMENTS),
+    include_presence: bool = Query(True),
     db=Depends(get_db),
     config: GreenhouseConfig = Depends(get_config),
 ):
@@ -196,7 +207,7 @@ def get_plant_measurements(
     if not simulation:
         return []
 
-    readings = recent_readings(db, simulation, plant_id, limit=limit)
+    readings = recent_readings(db, simulation, plant_id, limit=limit, include_presence=include_presence)
     return [
         MeasurementItem(
             event_id=r.event_id,
@@ -204,7 +215,7 @@ def get_plant_measurements(
             simulated_at=r.simulated_at,
             emitted_at=r.emitted_at,
             received_at=r.received_at,
-            heure_virtuelle=r.heure_virtuelle,
+            cycle=r.cycle, heure_virtuelle=r.heure_virtuelle,
             current_state=r.current_state,
             soil_moisture_pct=r.soil_moisture_pct,
             air_temperature_c=r.air_temperature_c,
@@ -261,35 +272,41 @@ def get_events(
 @router.get("/simulation", response_model=SimulationStateResponse)
 def get_simulation_state(
     db=Depends(get_db),
+    simulation_mode: bool = Depends(get_simulation_mode),
 ):
     """Retourne l'état courant de l'horloge et de la simulation."""
     simulation = latest_simulation(db)
     if not simulation:
-        return SimulationStateResponse()
+        return SimulationStateResponse(simulation_mode=simulation_mode)
 
-    # Prendre la lecture la plus récente parmi les bacs
+    # Horloge et météo commune issues de la même mesure de référence.
     sample = latest_reading(db, simulation, "basilic")
     if sample is None:
-        return SimulationStateResponse(simulation=simulation)
+        return SimulationStateResponse(simulation=simulation, simulation_mode=simulation_mode)
 
     # Vérification de présence (message émis dans les 10 dernières secondes)
     presence = False
     try:
         emitted = parse_local(sample.emitted_at)
-        if datetime.now(timezone.utc) - emitted < timedelta(seconds=10):
+        if timedelta(0) <= datetime.now(timezone.utc) - emitted < timedelta(seconds=PRESENCE_TTL_SECONDS):
             presence = True
     except Exception:
         presence = False
 
     return SimulationStateResponse(
+        simulation_mode=simulation_mode,
         simulation=simulation,
-        heure_virtuelle=sample.heure_virtuelle,
+        cycle=sample.cycle, heure_virtuelle=sample.heure_virtuelle,
         current_state=sample.current_state,
         simulated_at=sample.simulated_at,
         paused=sample.paused,
         day_complete=sample.day_complete,
         scenario="journee_serre",
         presence=presence,
+        air_temperature_c=sample.air_temperature_c,
+        air_humidity_pct=sample.air_humidity_pct,
+        observed_at=sample.observed_at,
+        provenance=sample.provenance,
     )
 
 
@@ -297,6 +314,7 @@ def get_simulation_state(
     "/simulation/controls",
     response_model=ControlAcceptedResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_simulation_mode)],
 )
 def post_simulation_control(
     payload: ControlRequest,

@@ -63,6 +63,11 @@ def create_database_engine(
         if inspector.has_table("sensor_readings"):
             existing = {c["name"] for c in inspector.get_columns("sensor_readings")}
             expected = set(metadata.tables["sensor_readings"].columns.keys())
+            # Migration additive : les anciennes mesures appartiennent au cycle 1.
+            if expected - existing == {"cycle"} and not existing - expected:
+                with engine.begin() as connection:
+                    connection.exec_driver_sql("ALTER TABLE sensor_readings ADD COLUMN cycle INTEGER NOT NULL DEFAULT 1")
+                existing.add("cycle")
             if existing != expected:
                 raise RuntimeError("Schéma SQLite incompatible ; arrêter les services puis lancer PYTHONPATH=src .venv/bin/python scripts/reset_database.py pour reconstruire la base (historique effacé).")
         metadata.create_all(engine)

@@ -33,7 +33,7 @@ def stop(records):
 
 def start():
     subprocess.run(['docker', 'compose', 'up', '-d', 'mosquitto'], cwd=ROOT, check=True)
-    env = dict(os.environ, PYTHONPATH=str(ROOT / 'src'), OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', TOKENIZERS_PARALLELISM='false')
+    env = dict(os.environ, PYTHONPATH=str(ROOT / 'src'), GREENMIND_SIMULATION_MODE='1', OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', TOKENIZERS_PARALLELISM='false')
     records = []
     def launch(args, marker, readiness):
         path = RUN / (marker.rsplit('.', 1)[-1] + str(len(records)) + '.log')
@@ -68,13 +68,25 @@ def start():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['start', 'stop', 'reset'])
-    action = parser.parse_args().action
+    parser.add_argument('action', choices=['start', 'stop', 'reset', 'from-scratch'])
+    args = parser.parse_args()
+    action = args.action
     RUN.mkdir(parents=True, exist_ok=True)
     import fcntl
     with (RUN / 'launcher.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         records = json.loads(REGISTRY.read_text()) if REGISTRY.exists() else []
+        if action == 'from-scratch':
+            print('Effacement de la base de serre ET des compteurs. Les services seront arrêtés.')
+            if input('Saisir EFFACER pour confirmer : ').strip() != 'EFFACER':
+                print('Annulé ; aucune modification.')
+                return
+            stop(records)
+            env = dict(os.environ, PYTHONPATH=str(ROOT / 'src'))
+            subprocess.run([sys.executable, str(ROOT / 'scripts/reset_database.py'), '--all'],
+                           cwd=ROOT, env=env, check=True)
+            print('Base vide et compteurs effacés. Utiliser start pour démarrer une nouvelle démo.')
+            return
         if action == 'start' and any(alive(r) for r in records):
             raise RuntimeError('Une démo est déjà lancée.')
         if action in ('stop', 'reset'):

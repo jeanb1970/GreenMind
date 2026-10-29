@@ -3,6 +3,7 @@
 L'appelant sérialise les appels et transporte les transitions vers MQTT en B3.
 Ce module ne dort pas, ne publie pas et ne modifie aucune base.
 """
+from greenmind.simulation_rules import HOURS_PER_CYCLE
 from greenmind.identifiers import next_simulation, SimulationId
 
 from collections.abc import Callable, Sequence
@@ -33,6 +34,7 @@ class SimulationSnapshot:
     day_complete: bool
     weather: WeatherReading
     soil_values: tuple[tuple[str, float], ...]
+    cycle: int = 1
 
     @property
     def soil(self) -> dict[str, float]:
@@ -52,7 +54,7 @@ class SimulationTransition:
 
 def validate_weather_day(readings: Sequence[WeatherReading]) -> None:
     """Exige 24 intervalles consécutifs à partir de minuit du scénario."""
-    if len(readings) != 24:
+    if len(readings) != HOURS_PER_CYCLE:
         raise ValueError("La journée de serre doit contenir exactement 24 heures.")
     start = readings[0].observed_at
     if start.tzinfo is None or start.utcoffset() is None:
@@ -61,7 +63,7 @@ def validate_weather_day(readings: Sequence[WeatherReading]) -> None:
     local = start.astimezone(SCENARIO_TIMEZONE)
     if (local.hour, local.minute, local.second, local.microsecond) != (0, 0, 0, 0):
         raise ValueError("La journée météo doit commencer à minuit en Europe/Brussels.")
-    end = (start + timedelta(hours=24)).astimezone(SCENARIO_TIMEZONE)
+    end = (start + timedelta(hours=HOURS_PER_CYCLE)).astimezone(SCENARIO_TIMEZONE)
     if end.hour != 0 or end.date() != local.date() + timedelta(days=1):
         raise ValueError("Choisir une journée de 24 heures sans changement d'heure.")
     for index, reading in enumerate(readings):
@@ -93,6 +95,7 @@ class SimulationEngine:
         self._deadline: float | None = None
         self._simulation = next_simulation()
         self._soil = initial_soil_state(config)
+        self._cycle = 1
         self._tick = 0
         self._revision = 0
         self._paused = True
@@ -100,6 +103,7 @@ class SimulationEngine:
     def snapshot(self) -> SimulationSnapshot:
         return SimulationSnapshot(
             simulation=self._simulation,
+            cycle=self._cycle,
             simulated_at=self._weather[0].observed_at + timedelta(hours=self._tick),
             heure_virtuelle=self._tick,
             current_state=self._revision,
@@ -118,7 +122,7 @@ class SimulationEngine:
 
     def resume(self) -> SimulationTransition | None:
         if self._tick == len(self._weather):
-            raise ValueError("La journée est terminée ; démarrer une nouvelle exécution.")
+            raise ValueError("La journée est terminée ; utiliser Jour suivant.")
         if not self._paused:
             return None
         deadline = self._now() + REAL_SECONDS_PER_HOUR
@@ -141,6 +145,17 @@ class SimulationEngine:
         if not self._paused:
             raise ValueError("Mettre la simulation en pause avant une avance manuelle.")
         return self._advance()
+
+    def next_day(self) -> SimulationTransition:
+        """Rejoue le même profil, en pause, sans remettre les bacs à zéro."""
+        if self._tick != len(self._weather) or not self._paused:
+            raise ValueError("Terminer la journée avant de passer au cycle suivant.")
+        before = self.snapshot()
+        self._cycle += 1
+        self._tick = 0
+        self._revision += 1
+        self._deadline = None
+        return SimulationTransition("next_day", before, self.snapshot())
 
     def _advance(self) -> SimulationTransition:
         if self._tick == len(self._weather):
@@ -191,7 +206,7 @@ class SimulationEngine:
 
     def water(self, plant_id: str, watering_duration_s: float) -> SimulationTransition:
         """Applique instantanément un gain virtuel, sans avancer l'heure météo."""
-        from greenmind.domain.watering import plan_watering
+        from greenmind.domain.arrosage import plan_watering
         profile = self._config.get_plant(plant_id)
         plan = plan_watering(profile, self._soil[plant_id])
         if not isfinite(watering_duration_s) or abs(watering_duration_s - plan.watering_duration_s) > 1e-9:

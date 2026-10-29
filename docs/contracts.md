@@ -69,16 +69,17 @@ Topic : `greenmind/v3/plants/{plant_id}/telemetry`.
 | `schema_version`, `event_id`, `simulation` | Version 3 et identifiants ci-dessus |
 | `plant_id` | `basilic`, `thym` ou `romarin`, identique au topic |
 | `observed_at`, `simulated_at`, `emitted_at` | Formats belges ci-dessus |
-| `heure_virtuelle` | Entier 0–24 : nombre d’heures virtuelles écoulées |
+| `cycle` | Entier positif, 1 par défaut pour les anciens messages ; numéro du jour rejoué |
+| `heure_virtuelle` | Entier 0–24 : pas du cycle courant ; heures cumulées = `(cycle - 1) × 24 + heure_virtuelle` |
 | `current_state` | Compteur entier de version, au moins égal à `heure_virtuelle` |
 | `paused`, `day_complete`, `arroseur_active` | Booléens |
 | `air_temperature_c` | Température finie en °C |
 | `air_humidity_pct`, `soil_moisture_pct` | Nombres entre 0 et 100 |
 | `provenance` | `meteo_simulee` ou `meteo_historique` ; sol toujours simulé |
-| `measurement_origin` | `initial`, `calcul_horaire`, `modification_manuelle`, `arrosage`, `signal_presence` |
+| `measurement_origin` | `initial`, `calcul_horaire`, `modification_manuelle`, `arrosage`, `signal_presence`, `jour_suivant` |
 
 `day_complete` correspond au pas 24 et impose la pause. L’origine `initial`
-impose les compteurs à zéro. Chaque émission nouvelle reçoit un nouvel `event_id` ;
+impose le pas et la révision à zéro, au cycle 1. Chaque émission nouvelle reçoit un nouvel `event_id` ;
 un doublon identique est ignoré par SQLite. Une mesure tardive reste dans
 l’historique sans remplacer l’état courant ni rejouer ses transitions d’alerte.
 Un signal de présence est publié toutes les cinq secondes, sans dessèchement en pause.
@@ -95,6 +96,7 @@ Champs : `schema_version`, `control_id`, `simulation`, `expected_state`, `action
 | `pause` | `plant_id` et `moist_request_pct` à `null` |
 | `reprendre` | Mêmes contraintes |
 | `avancer_1_heure` | Mêmes contraintes ; uniquement en pause |
+| `jour_suivant` | Uniquement au pas 24 en pause ; conserve session et sol, incrémente cycle et révision, revient au pas 0 en pause |
 | `modifier_humidite_sol` | Bac et humidité demandée entre 0 et 100 ; uniquement en pause |
 
 Le simulateur vérifie la session, l’expiration et `expected_state`. L’expiration
@@ -115,13 +117,13 @@ persistée pour une tentative explicite, sans prolongation de l’expiration.
 
 ## Arrosage : proposition, confirmation et suivi
 
-- `POST /api/v1/plants/{plant_id}/watering-proposals` : corps `{}` ou avec
+- `POST /api/v1/plants/{plant_id}/arrosage-proposals` : corps `{}` ou avec
   `proposal_id`. Retour 201 avec `simulation`, `current_state`, `plant_id`,
   `watering_duration_s`, `moist_before_pct`, `moist_after_pct`, `duration_limited`,
   `reason` et `expires_at`. Aucun effet ni publication MQTT.
-- `POST /api/v1/plants/{plant_id}/watering-commands` : `proposal_id` obligatoire,
+- `POST /api/v1/plants/{plant_id}/arrosage-commands` : `proposal_id` obligatoire,
   `command_id` optionnel. Confirmation explicite ; retour 202 avec le suivi.
-- `GET /api/v1/watering-commands/{command_id}` : `status`, `reason`,
+- `GET /api/v1/arrosage-commands/{command_id}` : `status`, `reason`,
   `resulting_state`, `measurement_pending`, session, bac, proposition et expiration.
 
 La confirmation revalide session, version, fraîcheur d’émission inférieure à dix
@@ -177,8 +179,36 @@ résultat tardif.
 `database_connected`, `mqtt_connected`, `simulation_mode`.
 `GET /plants`, `/plants/{plant_id}`, `/plants/{plant_id}/measurements`,
 `/simulation` et les routes de suivi sont sous le même préfixe `/api/v1`.
-Erreurs : 404 cible inconnue, 409 conflit/expiration/repos, 422 contenu invalide,
+Erreurs : 403 mode simulation désactivé, 404 cible inconnue, 409 conflit/expiration/repos, 422 contenu invalide,
 503 dépendance indisponible. Les messages explicatifs sont en français.
+
+`GET /plants` expose aussi `moist_low_pct`, `moist_rearm_pct`, `moist_high_pct`,
+`moist_target_pct` et `arroseur_active` (null sans mesure). Les seuils proviennent
+du profil ; l’état d’arroseur provient de la dernière mesure. Les arrosages étant
+appliqués instantanément par le simulateur, le suivi de commande reste la preuve
+d’exécution et l’état « au repos » n’implique pas une absence d’arrosage passé.
+
+`GET /simulation` expose `simulation_mode`, `presence`, l’horloge et les champs
+`air_temperature_c`, `air_humidity_pct`, `observed_at`, `provenance`. Horloge et
+météo proviennent de la même dernière mesure du basilic, bac de référence pour
+l’ambiance commune. Sans mesure de référence, les champs météo sont null et
+`presence` est faux. La présence exige une émission âgée de moins de dix secondes
+réelles et non située dans le futur ; la pause ne change pas ce délai.
+
+`GREENMIND_SIMULATION_MODE=1` active les contrôles ; la valeur par défaut est `0`.
+Le lanceur `scripts/demo.py start|reset` active explicitement le mode pour la démo.
+La configuration est figée à la création de l’application. Toute autre valeur
+est refusée ; un mode actif avec `GREENMIND_API_HOST` hors loopback est refusé.
+`POST /simulation/controls` retourne 403 en mode désactivé, avant accès SQL,
+allocation d’identifiant ou publication MQTT, y compris pour un rejeu. Les routes
+de consultation et de suivi restent disponibles. Ce mode concerne les contrôles
+de simulation, et ne constitue pas une authentification applicative.
+
+La route `GET /api/v1/plants/{plant_id}/measurements` accepte `limit` (24 par
+défaut, 1 000 maximum) et `include_presence` (vrai par défaut). Avec
+`include_presence=false`, les signaux de présence sont exclus **avant** la limite ;
+les étapes horaires, mesures initiales et interventions restent disponibles pendant
+une longue pause. Les valeurs numériques de l’API conservent leur précision.
 
 ## SQLite et reconstruction
 
@@ -188,3 +218,42 @@ reconstruire la base au schéma 3, sans sauvegarde de l’historique, conformém
 choix validé. Pour une autre base, ajouter `--database CHEMIN`.
 Le stockage des compteurs est conservé. L’API et l’ingestion utilisent le même
 `GREENMIND_DATABASE_PATH`, par défaut `outputs/greenmind.sqlite`.
+
+
+## Assistant local en lecture seule
+
+`POST /api/v1/assistant/ask` reçoit `plant_id` et `question` (1 à 1000 caractères).
+La réponse sépare `facts` (instantané serveur), `explanation`, `sources` et
+`action_executed`, toujours faux. Les valeurs de `status` sont `répondu`,
+`sources_insuffisantes`, `indisponible`, `occupé` et `action_non_exécutée`.
+Une dégradation du seul service IA conserve les faits et retourne HTTP 200 avec
+son statut métier explicite ; une panne SQL retourne 503. La plante inconnue
+retourne 404 et le contenu invalide 422.
+
+Une seule génération est active, avec délai global de 40 secondes. Les sources,
+extraits et faits numériques proviennent du serveur ; aucun appel de commande
+n’est exposé au modèle. Schémas, contraintes, préparation et mesures de latence :
+[Assistant_local.md](Assistant_local.md).
+
+
+### Cycles répétés et disponibilité de l’assistant
+
+`cycle` accompagne les télémétries et événements MQTT, ainsi que les réponses
+`GET /simulation` et les mesures REST. Le profil météo et ses dates sont fixes ;
+aucune progression du calendrier ni règle été/hiver entre les cycles. Le passage
+au cycle suivant produit une télémétrie d’origine `jour_suivant`, consultable dans
+l’historique filtré sans signaux de présence. Révision et identifiants restent
+monotones ; expiration, conflit et idempotence des contrôles restent applicables.
+La migration SQLite ajoute uniquement `sensor_readings.cycle INTEGER NOT NULL
+DEFAULT 1` à un schéma v3 compatible. Les lignes anciennes sont conservées au
+cycle 1 ; un autre schéma incompatible reste refusé. Les services doivent charger
+la même version du code.
+
+`GET /api/v1/assistant/health` répond avec `available`, `status` et `reason`.
+Un HTTP 200 signifie que le contrôle a répondu ; seul `available=true` annonce
+la disponibilité vérifiée. Le contrôle ne génère aucun texte et ne publie aucune
+commande. Ollama et le modèle sont interrogés avec un délai court ; la recherche
+locale est préparée en arrière-plan, contrôlée à nouveau après trente secondes.
+Une erreur de santé IA ne bloque pas la supervision IoT. Un contrôle réussi ne
+garantit pas qu’une future génération réussira : les erreurs de demande restent
+prises en charge par `/assistant/ask`.

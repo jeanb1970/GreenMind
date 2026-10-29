@@ -1,0 +1,56 @@
+/* Variante claire : fond lumineux, tuiles sauge légèrement plus foncées. */
+[data-testid="stAppViewContainer"] {
+  background-color: #f8fbf8;
+  background-image: radial-gradient(ellipse at 90% 0%, #dfefe5 0%, transparent 55%),
+    repeating-linear-gradient(145deg, transparent 0 100px, #1b735608 101px 102px, transparent 103px 200px);
+}
+[data-testid="stHeader"] { background: #f8fbf8f5; }
+[data-testid="stHeader"] button { color: #214d3b; }
+[data-testid="stSidebar"] { background: #e7f0e9; color: #183e2d; border-right-color: #c2d5c8; }
+[data-testid="stSidebarCollapseButton"] button,
+button[aria-label="Expand sidebar"] {
+  background: #d5e7da; border-color: #659379; color: #173e2b !important;
+}
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"],
+[data-testid="stSidebar"] button { color: #183e2d; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: #476654; }
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] { background: #d5e7da; border-color: #92b79f; color: #174b31; }
+.st-key-refresh button { box-shadow: 0 3px 0 #92b79f; }
+[data-testid="stSidebar"] .st-key-refresh button:enabled:hover { background: #c2ddcc; border-color: #387957; }
+[data-testid="stSidebar"] .st-key-refresh button:enabled:active {
+  background: #b1d2bf; border-color: #286744; color: #123b27;
+  box-shadow: inset 0 2px 4px #174b3140;
+}
+.sidebar-brand { color: #16422e; }
+.sidebar-brand span { color: #087c5b; }
+.sidebar-line { background: #087c5b; }
+[data-testid="stSidebar"] [data-testid="stButtonGroup"] button { background: #f5faf6; color: #214d3b; border-color: #a3c2ae; }
+[data-testid="stSidebar"] [data-testid="stButtonGroup"] button[aria-checked="true"] { background: #d1e7d9; color: #12422c; border-color: #087f62; }
+.st-key-status, .st-key-weather, .st-key-history, .st-key-journal, .st-key-assistant, .st-key-console_panel,
+.st-key-bac_basilic, .st-key-bac_thym, .st-key-bac_romarin {
+  background: #eaf2ec;
+  border-color: #c4d7ca !important;
+  box-shadow: 0 6px 22px #214d3b0a;
+}
+.st-key-hero {
+  background-color: #edf5ef;
+  background-image: linear-gradient(90deg, #e5f0e8 0%, #e5f0e8f5 36%, #e5f0e8b8 70%, #e5f0e880 100%),
+    url("data:image/jpeg;base64,__ILLUSTRATION__");
+  background-blend-mode: normal;
+  border-color: #abcdb8;
+  box-shadow: 0 10px 30px #214d3b10;
+}
+.hero-brand, .st-key-hero h1 { color: #123f2b; }
+.hero-brand > span:first-child { color: #087c5b; }
+.hero-tag { color: #3c654e; }
+.st-key-hero [data-testid="stCaptionContainer"],
+.st-key-hero [data-testid="stCaptionContainer"] p, .hero-note { color: #305941; }
+.st-key-hero .hero-note { color: #365f49; }
+[data-testid="stForm"] { background: #f5f9f6; border-color: #bcd3c4; }
+[data-testid="stTextInput"] input { background: #f8fbf8; }
+.st-key-history [data-testid="stVegaLiteChart"] { background: #eaf2ec; border-radius: 12px; }
+@container (max-width: 700px) {
+  .st-key-hero { background-color: #edf5ef; background-blend-mode: normal; }
+}

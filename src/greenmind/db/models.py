@@ -32,6 +32,7 @@ class GreenhouseReading(Base):
     simulated_at: Mapped[str] = mapped_column(String(27))
     emitted_at: Mapped[str] = mapped_column(String(27))
     received_at: Mapped[str] = mapped_column(String(27))
+    cycle: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     heure_virtuelle: Mapped[int] = mapped_column(Integer)
     current_state: Mapped[int] = mapped_column(Integer)
     paused: Mapped[bool] = mapped_column(Boolean(create_constraint=True))

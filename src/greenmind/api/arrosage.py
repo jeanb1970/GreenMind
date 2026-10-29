@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
 from greenmind.api.dependencies import get_config, get_db, get_publisher
 from greenmind.api.schemas import ApiModel
-from greenmind.db import watering
+from greenmind.db import arrosage as watering
 
 router = APIRouter(prefix='/api/v1', tags=['Arrosage virtuel'])
 
@@ -52,7 +52,7 @@ def require_plant(config, plant_id):
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-@router.post('/plants/{plant_id}/watering-proposals', status_code=201, response_model=ProposalResponse)
+@router.post('/plants/{plant_id}/arrosage-proposals', status_code=201, response_model=ProposalResponse)
 def propose(plant_id: str, payload: ProposalRequest, db=Depends(get_db), config=Depends(get_config)):
     require_plant(config, plant_id)
     try:
@@ -62,7 +62,7 @@ def propose(plant_id: str, payload: ProposalRequest, db=Depends(get_db), config=
         raise HTTPException(status_code=error.status_code, detail=str(error)) from error
 
 
-@router.post('/plants/{plant_id}/watering-commands', status_code=202, response_model=WateringStatusResponse)
+@router.post('/plants/{plant_id}/arrosage-commands', status_code=202, response_model=WateringStatusResponse)
 def confirm(plant_id: str, payload: ConfirmationRequest, db=Depends(get_db),
             config=Depends(get_config), publisher=Depends(get_publisher)):
     require_plant(config, plant_id)
@@ -84,7 +84,7 @@ def confirm(plant_id: str, payload: ConfirmationRequest, db=Depends(get_db),
         raise HTTPException(status_code=error.status_code, detail=str(error)) from error
 
 
-@router.get('/watering-commands/{command_id}', response_model=WateringStatusResponse)
+@router.get('/arrosage-commands/{command_id}', response_model=WateringStatusResponse)
 def track(command_id: CommandId, db=Depends(get_db)):
     try:
         return watering.command_status(db, command_id)

@@ -1,0 +1,102 @@
+:root { color-scheme: light; }
+[data-testid="stAppViewContainer"] {
+  background-color: #142b35;
+  background-image: radial-gradient(ellipse at 90% 0%, #244d49 0%, transparent 54%),
+    repeating-linear-gradient(145deg, transparent 0 100px, #b4f4db08 101px 102px, transparent 103px 200px);
+  background-attachment: fixed;
+}
+[data-testid="stHeader"] { background: #142b35ee; }
+[data-testid="stHeader"] button { color: #e6f5ef; }
+[data-testid="stMainBlockContainer"] { max-width: 1440px; padding-top: 5rem; padding-bottom: 4rem; container-type: inline-size; }
+[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+[data-testid="stColumn"] { flex: 1 1 240px; min-width: min(100%, 240px); }
+.st-key-hero {
+  background-image: linear-gradient(90deg, #102b32 0%, #102b32f5 34%, #102b3280 62%, #102b3222 100%),
+    url("data:image/jpeg;base64,__ILLUSTRATION__");
+  background-size: cover;
+  background-position: center, right 48%;
+  border: 1px solid #548d7b88;
+  border-radius: 24px;
+  padding: 32px 36px;
+  min-height: 255px;
+  margin-bottom: 8px;
+  box-shadow: 0 16px 48px #06171d33;
+}
+.hero-brand { color: #ddf9ef; font-size: 25px; font-weight: 650; letter-spacing: -.8px; }
+.hero-brand > span:first-child { color: #54eaa0; }
+.hero-tag { display: block; color: #bcdfd2; font-size: 11px; letter-spacing: 2px; margin-top: 6px; }
+.st-key-hero h1 { color: #f3fff9; font-weight: 650; font-size: clamp(2rem, 3.5vw, 3rem); letter-spacing: -1px; padding-top: 12px; padding-bottom: 4px; max-width: 65%; }
+.st-key-hero [data-testid="stCaptionContainer"], .st-key-hero [data-testid="stCaptionContainer"] p { color: #e0f0e9; font-size: 17px; }
+.st-key-hero [data-testid="stCaptionContainer"] { max-width: 53%; }
+.hero-note { color: #c0d8d1; font-size: 12px; max-width: 60%; margin-top: 8px; }
+.st-key-status, .st-key-weather, .st-key-history, .st-key-journal, .st-key-assistant, .st-key-console_panel,
+.st-key-bac_basilic, .st-key-bac_thym, .st-key-bac_romarin {
+  background: #ffffff;
+  color: #18352e;
+  border: 1px solid #d5e6dd !important;
+  border-radius: 20px !important;
+  padding: 24px !important;
+  box-shadow: 0 8px 28px #06171d16;
+}
+.st-key-status { padding: 16px 24px !important; }
+.st-key-status [data-testid="stAlert"] { margin: 0; }
+.st-key-status [data-testid="stCaptionContainer"] { font-size: 14px; }
+.st-key-bac_basilic, .st-key-bac_thym, .st-key-bac_romarin { position: relative; min-height: 245px; }
+.plant-art { height: 12px; text-align: right; pointer-events: none; }
+.plant-art img { position: absolute; right: 20px; top: 18px; }
+.st-key-bac_basilic h3, .st-key-bac_thym h3, .st-key-bac_romarin h3 { padding-right: 64px; }
+h2, h3 { font-weight: 650 !important; letter-spacing: -.4px; }
+[data-testid="stMetricValue"] { font-size: 2.5rem; font-weight: 600; letter-spacing: -1px; font-variant-numeric: tabular-nums; color: #12583e; }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: #4c665b; }
+[data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"] {
+  background: #f0f8f3; border-color: #a5cbb6; color: #17583e; border-radius: 10px; font-weight: 600; min-height: 42px;
+}
+[data-testid="stBaseButton-secondary"]:hover, [data-testid="stBaseButton-secondaryFormSubmit"]:hover { background: #e0f3e7; border-color: #087f62; color: #104b35; }
+button:focus-visible, input:focus-visible, [role="combobox"]:focus-visible { outline: 3px solid #168365 !important; outline-offset: 3px; }
+[data-testid="stForm"] { border-color: #d5e6dd; border-radius: 14px; }
+[data-testid="stSidebar"] { border-right: 1px solid #36564e; }
+[data-testid="stSidebarHeader"] {
+  position: relative; min-height: 192px; padding: 16px 20px;
+  align-items: flex-start;
+}
+[data-testid="stSidebarHeader"] img.stLogo {
+  height: 160px; width: 160px; max-height: none; max-width: 160px;
+  object-fit: contain; background: #f2f8f4; padding: 4px; border-radius: 16px;
+}
+[data-testid="stHeader"] img.stLogo {
+  background: #f2f8f4; border-radius: 6px; padding: 2px;
+}
+[data-testid="stSidebarCollapseButton"] {
+  position: absolute; right: 12px; top: 18px; z-index: 10;
+  opacity: 1 !important; visibility: visible !important; display: flex !important;
+}
+[data-testid="stSidebarCollapseButton"] button,
+button[aria-label="Expand sidebar"] {
+  opacity: 1 !important; visibility: visible !important;
+  min-width: 36px; min-height: 36px; border: 1px solid #659383;
+  border-radius: 8px; background: #21483f; color: #f2fff8 !important;
+}
+[data-testid="stSidebarCollapseButton"] button *,
+button[aria-label="Expand sidebar"] * { color: inherit !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"], [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: #bcd5cc; }
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] { background: #20453f; color: #e6f5ef; border-color: #4e7a69; }
+.st-key-refresh button { transition: transform 80ms ease, box-shadow 80ms ease; box-shadow: 0 3px 0 #102e28; }
+[data-testid="stSidebar"] .st-key-refresh button:enabled:hover { background: #2b5b50; border-color: #85c6ad; }
+[data-testid="stSidebar"] .st-key-refresh button:enabled:active {
+  transform: translateY(2px); background: #12372f; border-color: #a4e5c8;
+  box-shadow: inset 0 2px 4px #0007; color: #fff;
+}
+@media (prefers-reduced-motion: reduce) { .st-key-refresh button { transition: none; } }
+.sidebar-brand { color: #e3f9ef; font-size: 29px; letter-spacing: -1px; font-weight: 650; padding: 12px 0 4px; }
+.sidebar-brand span { color: #54eaa0; }
+.sidebar-line { width: 40px; height: 3px; border-radius: 3px; background: #54eaa0; margin: 8px 0 24px; }
+@container (max-width: 700px) {
+  .st-key-hero { background-color: #102b32; background-blend-mode: normal, soft-light; }
+  .st-key-hero h1, .st-key-hero [data-testid="stCaptionContainer"], .hero-note { max-width: 100%; }
+}
+@media (max-width: 700px) {
+  [data-testid="stMainBlockContainer"] { padding: 4.5rem 1rem 3rem; }
+  .st-key-hero { padding: 24px; min-height: 260px; background-color: #102b32; background-blend-mode: normal, soft-light; }
+  .st-key-hero h1, .st-key-hero [data-testid="stCaptionContainer"], .hero-note { max-width: 100%; }
+  .st-key-history, .st-key-journal, .st-key-assistant, .st-key-console_panel { padding: 18px !important; }
+}

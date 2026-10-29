@@ -43,7 +43,7 @@ def fake_publisher():
 
 @pytest.fixture
 def client(db, config, fake_publisher):
-    app = create_app()
+    app = create_app(simulation_mode=True)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: config
     app.dependency_overrides[get_publisher] = lambda: fake_publisher
@@ -270,7 +270,7 @@ def test_control_retry_keeps_exact_wire_payload_after_api_restart(client, db, co
     payload = {'action': 'avancer_1_heure', 'expected_state': 0, 'control_id': next_id("control")}
     assert client.post('/api/v1/simulation/controls', json=payload).status_code == 202
     # Nouvelle app et nouvelles connexions : la clé doit survivre au redémarrage.
-    app = create_app()
+    app = create_app(simulation_mode=True)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_publisher] = lambda: fake_publisher
     restarted = TestClient(app)
@@ -337,3 +337,106 @@ def test_revision_conflict_does_not_reserve_control_id(client, db, config, fake_
     assert fake_publisher.published == []
     assert client.post('/api/v1/simulation/controls', json=payload | {'expected_state': 2}).status_code == 202
     assert len(fake_publisher.published) == 1
+
+
+def test_measurements_presence_filter_precedes_limit(client, db, config):
+    simulation = next_simulation()
+    seed_telemetry(db, config, simulation)
+    # Une longue pause ne doit pas évincer les étapes et interventions du graphe.
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    for index in range(105):
+        save_message(db, TelemetryV3(
+            event_id=next_id("event"), simulation=simulation, plant_id="basilic",
+            observed_at=now, simulated_at=now + timedelta(hours=1),
+            emitted_at=now + timedelta(seconds=index + 1),
+            heure_virtuelle=1, current_state=1, paused=True, day_complete=False,
+            air_temperature_c=22.0, air_humidity_pct=60.0, soil_moisture_pct=48.0,
+            arroseur_active=False, provenance="meteo_simulee",
+            measurement_origin="signal_presence"), config=config)
+    default = client.get("/api/v1/plants/basilic/measurements?limit=1").json()
+    assert default[0]["measurement_origin"] == "signal_presence"
+    filtered = client.get("/api/v1/plants/basilic/measurements?limit=1&include_presence=false").json()
+    assert len(filtered) == 1
+    assert filtered[0]["measurement_origin"] == "calcul_horaire"
+    assert filtered[0]["soil_moisture_pct"] == 48.0
+
+
+@pytest.mark.parametrize('action, arguments', [
+    ('pause', {}), ('reprendre', {}), ('avancer_1_heure', {}),
+    ('modifier_humidite_sol', {'plant_id': 'thym', 'moist_request_pct': 18.0}),
+])
+def test_disabled_mode_refuses_controls_before_dependencies(monkeypatch, action, arguments):
+    # La configuration absente désactive le mode, même si le client forge une
+    # révision et une action valides. Ni SQL, ni MQTT, ni compteur ne sont touchés.
+    monkeypatch.delenv('GREENMIND_SIMULATION_MODE', raising=False)
+    app = create_app()
+    def forbidden():
+        pytest.fail('Une dépendance métier a été appelée en mode désactivé.')
+    app.dependency_overrides[get_db] = forbidden
+    app.dependency_overrides[get_publisher] = forbidden
+    monkeypatch.setattr('greenmind.api.routes.next_id', forbidden)
+    response = TestClient(app).post('/api/v1/simulation/controls', json={
+        'action': action, 'expected_state': 0, **arguments})
+    assert response.status_code == 403
+    assert 'désactivé' in response.json()['detail']
+
+
+def test_disabled_mode_keeps_reads_and_reports_actual_configuration(db, config, fake_publisher, monkeypatch):
+    monkeypatch.setenv('GREENMIND_SIMULATION_MODE', '0')
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: config
+    app.dependency_overrides[get_publisher] = lambda: fake_publisher
+    client = TestClient(app)
+    assert client.get('/api/v1/health').json()['simulation_mode'] is False
+    state = client.get('/api/v1/simulation').json()
+    assert state['simulation_mode'] is False
+    assert state['presence'] is False
+    assert state['simulation'] is None
+    assert state['air_temperature_c'] is None
+    assert client.get('/api/v1/plants').status_code == 200
+
+
+def test_environment_explicitly_enables_mode(db, monkeypatch):
+    monkeypatch.setenv('GREENMIND_SIMULATION_MODE', '1')
+    monkeypatch.setenv('GREENMIND_API_HOST', '127.0.0.1')
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: db
+    assert TestClient(app).get('/api/v1/simulation').json()['simulation_mode'] is True
+
+
+@pytest.mark.parametrize('value', ['true', 'false', 'invalid'])
+def test_invalid_simulation_configuration_is_rejected(monkeypatch, value):
+    monkeypatch.setenv('GREENMIND_SIMULATION_MODE', value)
+    with pytest.raises(ValueError, match='0 ou 1'):
+        create_app()
+
+
+def test_demo_mode_cannot_bind_public_host(monkeypatch):
+    monkeypatch.setenv('GREENMIND_SIMULATION_MODE', '1')
+    monkeypatch.setenv('GREENMIND_API_HOST', '0.0.0.0')
+    with pytest.raises(ValueError, match='loopback'):
+        create_app()
+
+
+@pytest.mark.parametrize('age, expected', [(9, True), (10, False), (-1, False)])
+def test_simulation_presence_and_weather_share_one_measurement(client, db, config, monkeypatch, age, expected):
+    from types import SimpleNamespace
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    monkeypatch.setattr('greenmind.api.routes.datetime', SimpleNamespace(now=lambda tz: now + timedelta(seconds=age)))
+    seed_telemetry(db, config, next_simulation())
+    state = client.get('/api/v1/simulation').json()
+    assert state['presence'] is expected
+    assert state['paused'] is True
+    assert state['air_temperature_c'] == 22.0
+    assert state['air_humidity_pct'] == 60.0
+    assert state['provenance'] == 'meteo_simulee'
+    basilic = client.get('/api/v1/plants').json()[0]
+    assert state['observed_at'] == basilic['observed_at']
+    assert state['simulated_at'] == basilic['simulated_at']
+    assert state['current_state'] == basilic['current_state']
+    assert basilic['moist_low_pct'] == 35.0
+    assert basilic['moist_rearm_pct'] == 40.0
+    assert basilic['moist_target_pct'] == 50.0
+    assert basilic['arroseur_id'] == 'arroseur_basilic'
+    assert basilic['arroseur_active'] is False

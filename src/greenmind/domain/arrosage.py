@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from math import isfinite
 from greenmind.greenhouse_config import BedProfile
+from greenmind.display import percent
 
 
 @dataclass(frozen=True)
@@ -22,8 +23,8 @@ def plan_watering(profile: BedProfile, moisture: float) -> WateringPlan:
     duration = min(profile.watering_max_duration_s, requested)
     duration_limited = requested > profile.watering_max_duration_s
     after = min(100.0, moisture + duration * profile.watering_gain_pct_per_s)
-    reason = (f"{profile.display_name} : humidité {moisture:g} % sous le seuil "
-              f"{profile.moist_low_pct:g} % ; arrosage de {duration:g} secondes virtuelles.")
+    reason = (f"{profile.display_name} : humidité {percent(moisture)} sous le seuil "
+              f"{percent(profile.moist_low_pct)} ; arrosage de {duration:g} secondes virtuelles.")
     if duration_limited:
-        reason += f" Durée plafonnée ; la cible {profile.moist_target_pct:g} % ne sera pas atteinte."
+        reason += f" Durée plafonnée ; la cible {percent(profile.moist_target_pct)} ne sera pas atteinte."
     return WateringPlan(duration, after, duration_limited, reason)
